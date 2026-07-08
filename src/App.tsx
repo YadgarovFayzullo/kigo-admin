@@ -1,0 +1,120 @@
+import { useEffect, useState } from 'react'
+import {
+  IcDashboard, IcUsers, IcMatch, IcSport, IcClub,
+  IcSearch, IcBell, IcSettings, IcCalendar, IcTrend, IcSun, IcMoon,
+} from './icons'
+import { players, matches, clubs, sports, reports, regions, type SportId } from './data'
+import Dashboard from './pages/Dashboard'
+import Players from './pages/Players'
+import Matches from './pages/Matches'
+import Sports from './pages/Sports'
+import Clubs from './pages/Clubs'
+import Reports from './pages/Reports'
+import Regions from './pages/Regions'
+
+type Route = 'dashboard' | 'players' | 'matches' | 'sports' | 'clubs' | 'reports' | 'regions'
+
+const openReports = reports.filter((r) => r.status === 'open').length
+
+const nav: { id: Route; label: string; icon: React.ReactNode; badge?: string }[] = [
+  { id: 'dashboard', label: 'Boshqaruv paneli', icon: <IcDashboard className="ic" /> },
+  { id: 'players', label: 'Oʻyinchilar', icon: <IcUsers className="ic" />, badge: String(players.length) },
+  { id: 'matches', label: 'Matchlar', icon: <IcMatch className="ic" />, badge: String(matches.length) },
+  { id: 'reports', label: 'Shikoyatlar', icon: <IcCalendar className="ic" />, badge: String(openReports) },
+  { id: 'regions', label: 'Hududlar', icon: <IcTrend className="ic" />, badge: String(regions.length) },
+  { id: 'sports', label: 'Sport turlari', icon: <IcSport className="ic" />, badge: String(sports.length) },
+  { id: 'clubs', label: 'Klublar', icon: <IcClub className="ic" />, badge: String(clubs.length) },
+]
+
+const titles: Record<Route, { h: string; crumb: string }> = {
+  dashboard: { h: 'Boshqaruv paneli', crumb: 'Umumiy koʻrsatkichlar' },
+  players: { h: 'Oʻyinchilar', crumb: 'Foydalanuvchilarni boshqarish' },
+  matches: { h: 'Matchlar', crumb: 'Oʻyinlar va juftlashuvlar' },
+  reports: { h: 'Shikoyatlar', crumb: 'Foydalanuvchi reportlari' },
+  regions: { h: 'Hududlar', crumb: 'Viloyatlar boʻyicha statistika' },
+  sports: { h: 'Sport turlari', crumb: 'Ilovadagi sport turlari' },
+  clubs: { h: 'Klublar', crumb: 'Hamkor obyektlar' },
+}
+
+export default function App() {
+  const [route, setRoute] = useState<Route>('dashboard')
+  const [sportFocus, setSportFocus] = useState<SportId | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    () => (localStorage.getItem('kigo-theme') as 'dark' | 'light') || 'dark',
+  )
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('kigo-theme', theme)
+  }, [theme])
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="logo">K</div>
+          <div>
+            <div className="name">KiGo</div>
+            <div className="tag">Admin panel</div>
+          </div>
+        </div>
+
+        <div className="nav-label">Menyu</div>
+        {nav.map((n) => (
+          <button
+            key={n.id}
+            className={`nav-item ${route === n.id ? 'active' : ''}`}
+            onClick={() => { setRoute(n.id); if (n.id === 'players') setSportFocus(null) }}
+          >
+            {n.icon}
+            {n.label}
+            {n.badge && <span className="badge">{n.badge}</span>}
+          </button>
+        ))}
+
+        <div className="nav-label">Boshqa</div>
+        <button className="nav-item"><IcSettings className="ic" /> Sozlamalar</button>
+
+        <div className="spacer" />
+        <div className="side-user">
+          <div className="av">AD</div>
+          <div>
+            <div className="who">Admin</div>
+            <div className="role">kigo.uz</div>
+          </div>
+        </div>
+      </aside>
+
+      <div className="main">
+        <header className="topbar">
+          <h1>{titles[route].h}</h1>
+          <span className="crumb">/ {titles[route].crumb}</span>
+          <div className="search">
+            <IcSearch className="ic" />
+            <input placeholder="Qidirish…" />
+          </div>
+          <button
+            className="icon-btn"
+            title={theme === 'dark' ? 'Yorugʻ rejim' : 'Qorongʻi rejim'}
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? <IcSun /> : <IcMoon />}
+          </button>
+          <button className="icon-btn"><IcBell /></button>
+        </header>
+
+        <main className="content">
+          {route === 'dashboard' && <Dashboard />}
+          {route === 'players' && <Players key={sportFocus ?? 'all'} initialSport={sportFocus} />}
+          {route === 'matches' && <Matches />}
+          {route === 'reports' && <Reports />}
+          {route === 'regions' && <Regions />}
+          {route === 'sports' && (
+            <Sports onOpenSport={(id) => { setSportFocus(id); setRoute('players') }} />
+          )}
+          {route === 'clubs' && <Clubs />}
+        </main>
+      </div>
+    </div>
+  )
+}
