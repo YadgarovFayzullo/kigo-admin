@@ -1,5 +1,13 @@
-import { matches, clubs, sports, players, regions, matchesPerMonth, overview } from '../data'
+import { useEffect, useState } from 'react'
+import { matchesPerMonth as mockMonths, overview } from '../data'
 import { IcUsers, IcMatch, IcClub, IcTrend } from '../icons'
+import {
+  getAdminSports, getAdminRegions, getAdminMatches, getAdminClubs,
+  getMatchesPerMonth,
+} from '../api/endpoints'
+import { adaptSport, adaptRegion, adaptMatch, type MatchRow } from '../api/adapters'
+import type { Sport } from '../data'
+import type { RegionRow } from '../api/adapters'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
@@ -27,29 +35,61 @@ function StatCard({
   )
 }
 
-export default function Dashboard() {
-  const totalPlayers = sports.reduce((s, x) => s + x.players, 0)
-  const confirmed = matches.filter((m) => m.status === 'confirmed').length
-  const max = Math.max(...matchesPerMonth.map((m) => m.value))
-  const topSports = [...sports].sort((a, b) => b.players - a.players).slice(0, 6)
-  const maxSport = topSports[0].players
-  const recent = matches.slice(0, 6)
+interface MonthPoint { month: string; value: number }
 
-  const regionStats = regions
-    .map((r) => ({
-      name: r,
-      users: players.filter((p) => p.region === r).length,
-      clubs: clubs.filter((c) => c.region === r).length,
-    }))
-    .sort((a, b) => b.users - a.users)
-    .slice(0, 6)
+// Best-effort normalization of the untyped /stats/matches-per-month payload.
+function normalizeMonths(raw: unknown): MonthPoint[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const out: MonthPoint[] = []
+  for (const item of raw as Record<string, unknown>[]) {
+    const month = String(item.month ?? item.label ?? item.date ?? item.period ?? '')
+    const value = Number(item.value ?? item.count ?? item.total ?? item.matches ?? 0)
+    if (month) out.push({ month, value })
+  }
+  return out.length ? out : null
+}
+
+export default function Dashboard() {
+  const [sports, setSports] = useState<Sport[]>([])
+  const [regions, setRegions] = useState<RegionRow[]>([])
+  const [matches, setMatches] = useState<MatchRow[]>([])
+  const [clubsCount, setClubsCount] = useState<number | null>(null)
+  const [months, setMonths] = useState<MonthPoint[]>(mockMonths)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const [s, r, m, c, mm] = await Promise.allSettled([
+        getAdminSports(), getAdminRegions(), getAdminMatches(), getAdminClubs(),
+        getMatchesPerMonth(),
+      ])
+      if (!alive) return
+      if (s.status === 'fulfilled') setSports(s.value.map((x) => adaptSport(x)))
+      if (r.status === 'fulfilled') setRegions(r.value.map((x) => adaptRegion(x)))
+      if (m.status === 'fulfilled') setMatches(m.value.map((x) => adaptMatch(x)))
+      if (c.status === 'fulfilled') setClubsCount(c.value.length)
+      if (mm.status === 'fulfilled') {
+        const norm = normalizeMonths(mm.value)
+        if (norm) setMonths(norm)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const totalPlayers = sports.reduce((s, x) => s + x.players, 0)
+  const confirmed = matches.filter((m) => m.statusKey === 'confirmed' || m.statusKey === 'played').length
+  const max = Math.max(1, ...months.map((m) => m.value))
+  const topSports = [...sports].sort((a, b) => b.players - a.players).slice(0, 6)
+  const maxSport = Math.max(1, ...topSports.map((s) => s.players))
+  const recent = matches.slice(0, 6)
+  const regionStats = [...regions].sort((a, b) => b.users - a.users).slice(0, 6)
 
   return (
     <>
       <div className="grid cols-4">
         <StatCard icon={<IcUsers />} val={nf.format(totalPlayers)} lbl="Faol oʻyinchilar" delta="12.4%" />
-        <StatCard icon={<IcMatch />} cls="blue" val={nf.format(matchesPerMonth.at(-1)!.value)} lbl="Shu oydagi matchlar" delta="9.1%" />
-        <StatCard icon={<IcClub />} cls="amber" val={String(clubs.length)} lbl="Klublar" delta="2 ta" />
+        <StatCard icon={<IcMatch />} cls="blue" val={nf.format(months.at(-1)?.value ?? matches.length)} lbl="Shu oydagi matchlar" delta="9.1%" />
+        <StatCard icon={<IcClub />} cls="amber" val={String(clubsCount ?? '—')} lbl="Klublar" delta="2 ta" />
         <StatCard icon={<IcTrend />} cls="green" val="94%" lbl="Match muvaffaqiyati" delta="3.2%" />
       </div>
 
@@ -113,17 +153,14 @@ export default function Dashboard() {
           <div className="card-h">
             <div>
               <h3>Matchlar dinamikasi</h3>
-              <span className="sub">Oxirgi 12 oy · jami oʻ​tkazilgan oʻyinlar</span>
+              <span className="sub">Oxirgi oylar · jami oʻtkazilgan oʻyinlar</span>
             </div>
             <span className="delta up">↑ 12.4%</span>
           </div>
           <div className="chart">
-            {matchesPerMonth.map((m, i) => (
+            {months.map((m) => (
               <div className="bar-col" key={m.month} title={`${m.month}: ${nf.format(m.value)}`}>
-                <div
-                  className={`bar ${i === matchesPerMonth.length - 1 ? '' : ''}`}
-                  style={{ height: `${(m.value / max) * 100}%` }}
-                />
+                <div className="bar" style={{ height: `${(m.value / max) * 100}%` }} />
                 <span className="bar-x">{m.month}</span>
               </div>
             ))}
@@ -135,6 +172,7 @@ export default function Dashboard() {
             <h3>Sport boʻyicha</h3>
             <span className="sub">oʻyinchilar</span>
           </div>
+          {topSports.length === 0 && <div className="empty">Yuklanmoqda…</div>}
           {topSports.map((s) => (
             <div className="dist-row" key={s.id}>
               <span className="dname">{s.emoji} {s.name}</span>
@@ -154,7 +192,7 @@ export default function Dashboard() {
         </div>
         <div className="region-grid">
           {regionStats.map((r) => (
-            <div className="region-card" key={r.name}>
+            <div className="region-card" key={r.id}>
               <div className="pin"><IcClub /></div>
               <div className="rname">{r.name}</div>
               <div className="rnums">
@@ -169,7 +207,7 @@ export default function Dashboard() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-h">
           <h3>Soʻnggi matchlar</h3>
-          <span className="sub">{confirmed} ta tasdiqlangan bugun</span>
+          <span className="sub">{confirmed} ta oʻtkazilgan / tasdiqlangan</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -182,26 +220,21 @@ export default function Dashboard() {
             <tbody>
               {recent.map((m) => (
                 <tr key={m.id}>
-                  <td className="cell-sub">{m.id}</td>
-                  <td><span className="tag">{sports.find((s) => s.id === m.sport)?.emoji} {sports.find((s) => s.id === m.sport)?.name}</span></td>
+                  <td className="cell-sub">MT-{m.id}</td>
+                  <td><span className="tag">{m.sportEmoji} {m.sportName}</span></td>
                   <td className="cell-main">{m.a} <span className="cell-sub">vs</span> {m.b}</td>
-                  <td>{m.district}</td>
+                  <td>{m.district || m.region}</td>
                   <td className="cell-sub">{m.date} · {m.time}</td>
-                  <td><span className={`pill ${m.status}`}>{statusUz(m.status)}</span></td>
+                  <td><span className={`pill ${m.statusKey}`}>{m.statusLabel}</span></td>
                 </tr>
               ))}
+              {recent.length === 0 && (
+                <tr><td colSpan={6}><div className="empty">Match topilmadi</div></td></tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
     </>
   )
-}
-
-export function statusUz(s: string) {
-  return ({
-    confirmed: 'Tasdiqlangan', searching: 'Qidirilmoqda',
-    played: 'Oʻtkazilgan', cancelled: 'Bekor qilingan',
-    active: 'Faol', blocked: 'Bloklangan', pending: 'Kutilmoqda', paused: 'Toʻxtatilgan',
-  } as Record<string, string>)[s] ?? s
 }

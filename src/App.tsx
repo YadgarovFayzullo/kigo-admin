@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   IcDashboard, IcUsers, IcMatch, IcSport, IcClub,
-  IcSearch, IcBell, IcSettings, IcCalendar, IcTrend, IcSun, IcMoon,
+  IcSearch, IcBell, IcSettings, IcCalendar, IcTrend, IcSun, IcMoon, IcLogout,
 } from './icons'
 import { players, matches, clubs, sports, reports, regions, type SportId } from './data'
 import Dashboard from './pages/Dashboard'
@@ -11,6 +11,8 @@ import Sports from './pages/Sports'
 import Clubs from './pages/Clubs'
 import Reports from './pages/Reports'
 import Regions from './pages/Regions'
+import Login from './pages/Login'
+import { useAuth } from './api/auth'
 
 type Route = 'dashboard' | 'players' | 'matches' | 'sports' | 'clubs' | 'reports' | 'regions'
 
@@ -37,6 +39,7 @@ const titles: Record<Route, { h: string; crumb: string }> = {
 }
 
 export default function App() {
+  const { admin, ready, logout } = useAuth()
   const [route, setRoute] = useState<Route>('dashboard')
   const [sportFocus, setSportFocus] = useState<SportId | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(
@@ -47,6 +50,11 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('kigo-theme', theme)
   }, [theme])
+
+  if (!ready) return <div className="login-wrap">Yuklanmoqda…</div>
+  if (!admin) return <Login />
+
+  const adminName = [admin.name, admin.surname].filter(Boolean).join(' ') || 'Admin'
 
   return (
     <div className="app">
@@ -77,11 +85,14 @@ export default function App() {
 
         <div className="spacer" />
         <div className="side-user">
-          <div className="av">AD</div>
+          <div className="av">{adminName.slice(0, 2).toUpperCase()}</div>
           <div>
-            <div className="who">Admin</div>
-            <div className="role">kigo.uz</div>
+            <div className="who">{adminName}</div>
+            <div className="role">{admin.email ?? 'kigo.uz'}</div>
           </div>
+          <button className="icon-btn mla" title="Chiqish" onClick={() => void logout()}>
+            <IcLogout />
+          </button>
         </div>
       </aside>
 

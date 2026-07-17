@@ -1,16 +1,42 @@
-import { useState } from 'react'
-import { sports as initial, type Sport, type SportId } from '../data'
+import { useEffect, useState } from 'react'
+import { type Sport, type SportId } from '../data'
 import { IcPlus } from '../icons'
 import { Modal } from '../ui'
+import { getAdminSports, getSports } from '../api/endpoints'
+import { adaptSport } from '../api/adapters'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
 const emptySport = { name: '', emoji: '🏅', kind: 'solo' as Sport['kind'] }
 
 export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => void }) {
-  const [list, setList] = useState<Sport[]>(initial)
+  const [list, setList] = useState<Sport[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState(emptySport)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        // Admin endpoint carries player counts + active flag; fall back to the
+        // public dictionary (names only) when there's no token.
+        let sports: Sport[]
+        try {
+          sports = (await getAdminSports()).map((s) => adaptSport(s))
+        } catch {
+          sports = (await getSports()).map((s) => adaptSport(s))
+        }
+        if (alive) { setList(sports); setError(null) }
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : 'Yuklashda xatolik')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
 
   const toggle = (id: string) =>
     setList((l) => l.map((s) => (s.id === id ? { ...s, active: !s.active } : s)))
@@ -37,6 +63,13 @@ export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => 
           <IcPlus /> Sport turi qoʻshish
         </button>
       </div>
+
+      {loading && <div className="count-note" style={{ padding: '24px 4px' }}>Yuklanmoqda…</div>}
+      {error && !loading && (
+        <div className="count-note" style={{ padding: '24px 4px', color: '#ff5c6a' }}>
+          Xatolik: {error}
+        </div>
+      )}
 
       <div className="sport-grid">
         {list.map((s) => (

@@ -1,62 +1,136 @@
-import { useMemo, useState } from 'react'
-import { players as seed, regions, sports, sportEmoji, sportName, type Player, type SportId } from '../data'
+import { useEffect, useMemo, useState } from 'react'
+import { type SportId } from '../data'
 import { IcSearch, IcDownload, IcPlus, IcBlock, IcUnlock } from '../icons'
-import { statusUz } from './Dashboard'
 import { Avatar, Select, Pager, usePagination, Modal } from '../ui'
+import {
+  getAdminPlayers, createAdminPlayer, blockAdminPlayer, unblockAdminPlayer,
+} from '../api/endpoints'
+import {
+  adaptPlayer, sportDisplay, localized, type PlayerRow, type PlayerStatus,
+} from '../api/adapters'
+import { useRefData } from '../api/refData'
+import type { AdminPlayerWrite, Gender } from '../api/types'
 
-const regionOpts = [{ value: 'all', label: 'Barcha hududlar' },
-  ...regions.map((r) => ({ value: r, label: r }))]
-const sportOpts = [{ value: 'all', label: 'Barcha sportlar' },
-  ...sports.map((s) => ({ value: s.id, label: `${s.emoji} ${s.name}` }))]
+const statusUz: Record<PlayerStatus, string> = {
+  active: 'Faol', blocked: 'Bloklangan', pending: 'Kutilmoqda',
+}
 
-const emptyPlayer: Omit<Player, 'id'> = {
-  name: '', phone: '', gender: 'male', age: 18,
-  region: regions[0], district: '', avatar: ['#c6ff3d', '#34d17a'],
-  sport: 'football', level: 5, matches: 0, rating: 5,
-  status: 'pending', joined: new Date().toISOString().slice(0, 10),
+interface Draft {
+  name: string
+  surname: string
+  username: string
+  phone: string
+  gender: Gender
+  age: number
+  region_id: number | ''
+  district_id: number | ''
+}
+
+const emptyDraft: Draft = {
+  name: '', surname: '', username: '', phone: '', gender: 'male', age: 18,
+  region_id: '', district_id: '',
 }
 
 export default function Players({ initialSport = null }: { initialSport?: SportId | null }) {
-  const [list, setList] = useState<Player[]>(seed)
+  const { sports, regions, districts } = useRefData()
+  const [list, setList] = useState<PlayerRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [region, setRegion] = useState('all')
   const [gender, setGender] = useState('all')
   const [sport, setSport] = useState<string>(initialSport ?? 'all')
-  const [confirm, setConfirm] = useState<Player | null>(null) // player pending block
-  const [profile, setProfile] = useState<Player | null>(null) // player card view
+  const [confirm, setConfirm] = useState<PlayerRow | null>(null) // pending block/unblock
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [profile, setProfile] = useState<PlayerRow | null>(null)
   const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState(emptyPlayer)
+  const [draft, setDraft] = useState<Draft>(emptyDraft)
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
 
-  const setD = (patch: Partial<Player>) => setDraft((d) => ({ ...d, ...patch }))
-  const savePlayer = () => {
-    setList((l) => [
-      { ...draft, id: `PL-${1000 + l.length}` },
-      ...l,
-    ])
-    setAdding(false)
-    setDraft(emptyPlayer)
-  }
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const rows = (await getAdminPlayers()).map((p) => adaptPlayer(p))
+        if (alive) { setList(rows); setError(null) }
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : 'Yuklashda xatolik')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const sportOpts = useMemo(() => [
+    { value: 'all', label: 'Barcha sportlar' },
+    ...sports.map((s) => { const d = sportDisplay(s); return { value: d.code, label: `${d.emoji} ${d.name}` } }),
+  ], [sports])
+  const regionOpts = useMemo(() => [
+    { value: 'all', label: 'Barcha hududlar' },
+    ...regions.map((r) => ({ value: localized(r), label: localized(r) })),
+  ], [regions])
+
+  const setD = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
+  const districtOpts = useMemo(
+    () => districts.filter((d) => d.region_id === draft.region_id),
+    [districts, draft.region_id],
+  )
   const validPlayer = draft.name.trim() && draft.phone.trim()
 
-  // Block a user, or restore a blocked one back to active.
-  const toggleBlock = (id: string) =>
-    setList((l) => l.map((p) =>
-      p.id === id
-        ? { ...p, status: p.status === 'blocked' ? 'active' : 'blocked' }
-        : p,
-    ))
+  const savePlayer = async () => {
+    if (!validPlayer) return
+    setSaving(true)
+    setSaveErr(null)
+    try {
+      const body: AdminPlayerWrite = {
+        name: draft.name.trim(),
+        surname: draft.surname.trim() || undefined,
+        username: draft.username.trim() || undefined,
+        phone: draft.phone.trim(),
+        gender: draft.gender,
+        age: draft.age,
+        ...(draft.region_id !== '' ? { region_id: Number(draft.region_id) } : {}),
+        ...(draft.district_id !== '' ? { district_id: Number(draft.district_id) } : {}),
+      }
+      const created = adaptPlayer(await createAdminPlayer(body))
+      setList((l) => [created, ...l])
+      setAdding(false)
+      setDraft(emptyDraft)
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Saqlashda xatolik')
+    } finally {
+      setSaving(false)
+    }
+  }
 
-  const rows = useMemo(() => {
-    return list.filter((p) => {
-      if (status !== 'all' && p.status !== status) return false
-      if (region !== 'all' && p.region !== region) return false
-      if (gender !== 'all' && p.gender !== gender) return false
-      if (sport !== 'all' && p.sport !== sport) return false
-      if (q && !`${p.name} ${p.phone} ${p.district} ${p.id}`.toLowerCase().includes(q.toLowerCase())) return false
-      return true
-    })
-  }, [list, q, status, region, gender, sport])
+  // Block a user, or restore a blocked one — persisted server-side.
+  const toggleBlock = async (p: PlayerRow) => {
+    setBusyId(p.id)
+    try {
+      const updated = p.status === 'blocked'
+        ? await unblockAdminPlayer(p.id)
+        : await blockAdminPlayer(p.id)
+      const row = adaptPlayer(updated)
+      setList((l) => l.map((x) => (x.id === row.id ? row : x)))
+      setConfirm(null)
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Amalni bajarishda xatolik')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const rows = useMemo(() => list.filter((p) => {
+    if (status !== 'all' && p.status !== status) return false
+    if (region !== 'all' && p.region !== region) return false
+    if (gender !== 'all' && p.gender !== gender) return false
+    if (sport !== 'all' && p.sport !== sport) return false
+    if (q && !`${p.name} ${p.phone} ${p.district} ${p.id}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [list, q, status, region, gender, sport])
 
   const { slice, page, pages, total, setPage } = usePagination(rows)
 
@@ -80,16 +154,24 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
           <label>Qidiruv</label>
           <div className="search" style={{ margin: 0, width: 230 }}>
             <IcSearch className="ic" />
-            <input placeholder="Ism, ID (PL-1000), telefon…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
+            <input placeholder="Ism, ID, telefon…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
           </div>
         </div>
         <div className="field mla" style={{ justifyContent: 'flex-end' }}>
           <button className="btn ghost"><IcDownload /> Eksport</button>
         </div>
         <div className="field" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn primary" onClick={() => setAdding(true)}><IcPlus /> Qoʻshish</button>
+          <button className="btn primary" onClick={() => { setDraft(emptyDraft); setSaveErr(null); setAdding(true) }}>
+            <IcPlus /> Qoʻshish
+          </button>
         </div>
       </div>
+
+      {error && (
+        <div className="count-note" style={{ padding: '16px 4px', color: '#ff5c6a' }}>
+          Xatolik: {error}
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
@@ -109,7 +191,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
                       <Avatar name={p.name} colors={p.avatar} size={32} />
                       <div style={{ marginLeft: 10 }}>
                         <div className="cell-main">{p.name}</div>
-                        <div className="cell-sub">{p.id} · {p.joined}</div>
+                        <div className="cell-sub">#{p.id}{p.joined ? ` · ${p.joined}` : ''}</div>
                       </div>
                     </div>
                   </td>
@@ -119,16 +201,16 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
                     </span>{' '}
                     {p.gender === 'female' ? 'Ayol' : 'Erkak'}
                   </td>
-                  <td>{p.age}</td>
+                  <td>{p.age || '—'}</td>
                   <td className="cell-sub">{p.phone}</td>
-                  <td><span className="tag">{sportEmoji(p.sport)} {sportName(p.sport)}</span></td>
+                  <td>{p.sport ? <span className="tag">{p.sportEmoji} {p.sportName}</span> : <span className="cell-sub">—</span>}</td>
                   <td><span className="lvl">{p.level.toFixed(1)}</span></td>
                   <td>{p.matches}</td>
-                  <td>⭐ {p.rating.toFixed(1)}</td>
+                  <td>{p.rating ? p.rating.toFixed(0) : '—'}</td>
                   <td className="cell-sub">{p.region}<br /><span style={{ fontSize: 11 }}>{p.district}</span></td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span className={`pill ${p.status}`}>{statusUz(p.status)}</span>
+                      <span className={`pill ${p.status}`}>{statusUz[p.status]}</span>
                       {p.status === 'blocked' ? (
                         <button className="icon-act" title="Blokdan chiqarish" onClick={() => setConfirm(p)}>
                           <IcUnlock />
@@ -143,7 +225,9 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
                 </tr>
               ))}
               {total === 0 && (
-                <tr><td colSpan={10}><div className="empty">Hech narsa topilmadi</div></td></tr>
+                <tr><td colSpan={10}>
+                  <div className="empty">{loading ? 'Yuklanmoqda…' : 'Hech narsa topilmadi'}</div>
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -158,22 +242,32 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
           footer={
             <>
               <button className="btn ghost" onClick={() => setAdding(false)}>Bekor qilish</button>
-              <button className="btn primary" disabled={!validPlayer} onClick={savePlayer}>Saqlash</button>
+              <button className="btn primary" disabled={!validPlayer || saving} onClick={savePlayer}>
+                {saving ? 'Saqlanmoqda…' : 'Saqlash'}
+              </button>
             </>
           }
         >
           <div className="form-grid">
-            <div className="field full">
-              <label>Ism familiya *</label>
-              <input className="input" value={draft.name} onChange={(e) => setD({ name: e.target.value })} placeholder="Masalan: Sardor U." />
+            <div className="field">
+              <label>Ism *</label>
+              <input className="input" value={draft.name} onChange={(e) => setD({ name: e.target.value })} placeholder="Sardor" />
+            </div>
+            <div className="field">
+              <label>Familiya</label>
+              <input className="input" value={draft.surname} onChange={(e) => setD({ surname: e.target.value })} placeholder="Usmonov" />
             </div>
             <div className="field">
               <label>Telefon *</label>
-              <input className="input" value={draft.phone} onChange={(e) => setD({ phone: e.target.value })} placeholder="+998 90 123 45 67" />
+              <input className="input" value={draft.phone} onChange={(e) => setD({ phone: e.target.value })} placeholder="+998901234567" />
+            </div>
+            <div className="field">
+              <label>Username</label>
+              <input className="input" value={draft.username} onChange={(e) => setD({ username: e.target.value })} placeholder="sardor_u" />
             </div>
             <div className="field">
               <label>Jins</label>
-              <select className="select" value={draft.gender} onChange={(e) => setD({ gender: e.target.value as Player['gender'] })}>
+              <select className="select" value={draft.gender} onChange={(e) => setD({ gender: e.target.value as Gender })}>
                 <option value="male">Erkak</option>
                 <option value="female">Ayol</option>
               </select>
@@ -183,33 +277,20 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
               <input className="input" type="number" min={10} max={90} value={draft.age} onChange={(e) => setD({ age: Number(e.target.value) })} />
             </div>
             <div className="field">
-              <label>Sport turi</label>
-              <select className="select" value={draft.sport} onChange={(e) => setD({ sport: e.target.value as Player['sport'] })}>
-                {sports.map((s) => <option key={s.id} value={s.id}>{s.emoji} {s.name}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label>Daraja (1–10)</label>
-              <input className="input" type="number" min={1} max={10} step={0.1} value={draft.level} onChange={(e) => setD({ level: Number(e.target.value) })} />
-            </div>
-            <div className="field">
               <label>Viloyat</label>
-              <select className="select" value={draft.region} onChange={(e) => setD({ region: e.target.value })}>
-                {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+              <select className="select" value={draft.region_id} onChange={(e) => setD({ region_id: e.target.value ? Number(e.target.value) : '', district_id: '' })}>
+                <option value="">— tanlang —</option>
+                {regions.map((r) => <option key={r.id} value={r.id}>{localized(r)}</option>)}
               </select>
             </div>
             <div className="field">
               <label>Tuman</label>
-              <input className="input" value={draft.district} onChange={(e) => setD({ district: e.target.value })} placeholder="Tuman nomi" />
-            </div>
-            <div className="field full">
-              <label>Holat</label>
-              <select className="select" value={draft.status} onChange={(e) => setD({ status: e.target.value as Player['status'] })}>
-                <option value="pending">Kutilmoqda</option>
-                <option value="active">Faol</option>
-                <option value="blocked">Bloklangan</option>
+              <select className="select" value={draft.district_id} disabled={draft.region_id === ''} onChange={(e) => setD({ district_id: e.target.value ? Number(e.target.value) : '' })}>
+                <option value="">— tanlang —</option>
+                {districtOpts.map((d) => <option key={d.id} value={d.id}>{localized(d)}</option>)}
               </select>
             </div>
+            {saveErr && <div className="field full"><div className="login-error">{saveErr}</div></div>}
           </div>
         </Modal>
       )}
@@ -219,17 +300,15 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
           title="Oʻyinchi profili"
           onClose={() => setProfile(null)}
           footer={
-            <>
-              {profile.status === 'blocked' ? (
-                <button className="btn primary" onClick={() => { setConfirm(profile); setProfile(null) }}>
-                  <IcUnlock /> Blokdan chiqarish
-                </button>
-              ) : (
-                <button className="btn danger-solid" onClick={() => { setConfirm(profile); setProfile(null) }}>
-                  <IcBlock /> Bloklash
-                </button>
-              )}
-            </>
+            profile.status === 'blocked' ? (
+              <button className="btn primary" onClick={() => { setConfirm(profile); setProfile(null) }}>
+                <IcUnlock /> Blokdan chiqarish
+              </button>
+            ) : (
+              <button className="btn danger-solid" onClick={() => { setConfirm(profile); setProfile(null) }}>
+                <IcBlock /> Bloklash
+              </button>
+            )
           }
         >
           <div className="detail-head">
@@ -237,21 +316,29 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
             <div className="dh-main">
               <div className="dh-name">{profile.name}</div>
               <div className="dh-sub">
-                {profile.id} · <span className={`pill ${profile.status}`}>{statusUz(profile.status)}</span>
+                #{profile.id} · <span className={`pill ${profile.status}`}>{statusUz[profile.status]}</span>
               </div>
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, margin: '16px 0' }}>
             <div className="stat-mini"><b>{profile.matches}</b><span>Matchlar</span></div>
-            <div className="stat-mini"><b>{profile.level.toFixed(1)}</b><span>Daraja</span></div>
-            <div className="stat-mini"><b>⭐ {profile.rating.toFixed(1)}</b><span>Reyting</span></div>
+            <div className="stat-mini"><b>{profile.noShows}</b><span>Kelmagan</span></div>
+            <div className="stat-mini"><b>{profile.rating ? profile.rating.toFixed(0) : '—'}</b><span>Reyting</span></div>
           </div>
 
           <div className="kv">
             <div>
               <div className="k">Sport turi</div>
-              <div className="v">{sportEmoji(profile.sport)} {sportName(profile.sport)}</div>
+              <div className="v">{profile.sport ? `${profile.sportEmoji} ${profile.sportName}` : '—'}</div>
+            </div>
+            <div>
+              <div className="k">Daraja</div>
+              <div className="v">{profile.level.toFixed(1)}</div>
+            </div>
+            <div>
+              <div className="k">Ishonch darajasi</div>
+              <div className="v">{profile.trust || '—'}</div>
             </div>
             <div>
               <div className="k">Jins</div>
@@ -264,7 +351,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
             </div>
             <div>
               <div className="k">Yosh</div>
-              <div className="v">{profile.age}</div>
+              <div className="v">{profile.age || '—'}</div>
             </div>
             <div>
               <div className="k">Telefon</div>
@@ -280,7 +367,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
             </div>
             <div>
               <div className="k">Roʻyxatdan oʻtgan</div>
-              <div className="v">{profile.joined}</div>
+              <div className="v">{profile.joined || '—'}</div>
             </div>
           </div>
         </Modal>
@@ -288,6 +375,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
 
       {confirm && (() => {
         const isBlocked = confirm.status === 'blocked'
+        const busy = busyId === confirm.id
         return (
           <Modal
             title={isBlocked ? 'Oʻyinchini blokdan chiqarish' : 'Oʻyinchini bloklash'}
@@ -296,18 +384,12 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
               <>
                 <button className="btn ghost" onClick={() => setConfirm(null)}>Bekor qilish</button>
                 {isBlocked ? (
-                  <button
-                    className="btn primary"
-                    onClick={() => { toggleBlock(confirm.id); setConfirm(null) }}
-                  >
-                    <IcUnlock /> Ha, blokdan chiqarish
+                  <button className="btn primary" disabled={busy} onClick={() => toggleBlock(confirm)}>
+                    <IcUnlock /> {busy ? 'Bajarilmoqda…' : 'Ha, blokdan chiqarish'}
                   </button>
                 ) : (
-                  <button
-                    className="btn danger-solid"
-                    onClick={() => { toggleBlock(confirm.id); setConfirm(null) }}
-                  >
-                    <IcBlock /> Ha, bloklash
+                  <button className="btn danger-solid" disabled={busy} onClick={() => toggleBlock(confirm)}>
+                    <IcBlock /> {busy ? 'Bajarilmoqda…' : 'Ha, bloklash'}
                   </button>
                 )}
               </>
@@ -317,7 +399,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
               <Avatar name={confirm.name} colors={confirm.avatar} size={40} />
               <div>
                 <div className="cell-main">{confirm.name}</div>
-                <div className="cell-sub">{confirm.id} · {confirm.phone}</div>
+                <div className="cell-sub">#{confirm.id} · {confirm.phone}</div>
               </div>
             </div>
             <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 0, marginTop: 16 }}>
@@ -325,6 +407,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
                 ? 'Ushbu oʻyinchini blokdan chiqarmoqchimisiz? U yana ilovaga kira oladi va matchlarda koʻrinadi.'
                 : 'Ushbu oʻyinchini bloklamoqchimisiz? U ilovaga kira olmaydi va matchlarda koʻrinmaydi. Bu amalni keyinroq bekor qilishingiz mumkin.'}
             </p>
+            {saveErr && <div className="login-error" style={{ marginTop: 12 }}>{saveErr}</div>}
           </Modal>
         )
       })()}

@@ -1,28 +1,48 @@
-import { useMemo, useState } from 'react'
-import { matches, regions, sportEmoji, sportName, type Match } from '../data'
+import { useEffect, useMemo, useState } from 'react'
 import { IcSearch } from '../icons'
-import { statusUz } from './Dashboard'
 import { Select, Pager, usePagination, Modal } from '../ui'
-
-const regionOpts = [{ value: 'all', label: 'Barcha hududlar' },
-  ...regions.map((r) => ({ value: r, label: r }))]
+import { getAdminMatches } from '../api/endpoints'
+import { adaptMatch, localized, type MatchRow } from '../api/adapters'
+import { useRefData } from '../api/refData'
 
 export default function Matches() {
+  const { regions } = useRefData()
+  const [list, setList] = useState<MatchRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [type, setType] = useState('all')
   const [region, setRegion] = useState('all')
-  const [detail, setDetail] = useState<Match | null>(null)
+  const [detail, setDetail] = useState<MatchRow | null>(null)
 
-  const rows = useMemo(() => {
-    return matches.filter((m) => {
-      if (status !== 'all' && m.status !== status) return false
-      if (type !== 'all' && m.type !== type) return false
-      if (region !== 'all' && m.region !== region) return false
-      if (q && !`${m.a} ${m.b} ${m.district} ${m.id}`.toLowerCase().includes(q.toLowerCase())) return false
-      return true
-    })
-  }, [q, status, type, region])
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const rows = (await getAdminMatches()).map((m) => adaptMatch(m))
+        if (alive) { setList(rows); setError(null) }
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : 'Yuklashda xatolik')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const regionOpts = useMemo(() => [
+    { value: 'all', label: 'Barcha hududlar' },
+    ...regions.map((r) => ({ value: localized(r), label: localized(r) })),
+  ], [regions])
+
+  const rows = useMemo(() => list.filter((m) => {
+    if (status !== 'all' && m.statusKey !== status) return false
+    if (type !== 'all' && m.type !== type) return false
+    if (region !== 'all' && m.region !== region) return false
+    if (q && !`${m.a} ${m.b} ${m.district} ${m.id}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [list, q, status, type, region])
 
   const { slice, page, pages, total, setPage } = usePagination(rows)
 
@@ -31,10 +51,10 @@ export default function Matches() {
       <div className="toolbar">
         <Select label="Holat" value={status} onChange={(v) => { setStatus(v); setPage(1) }} options={[
           { value: 'all', label: 'Hammasi' },
+          { value: 'searching', label: 'Ochiq / qidirilmoqda' },
           { value: 'confirmed', label: 'Tasdiqlangan' },
-          { value: 'searching', label: 'Qidirilmoqda' },
           { value: 'played', label: 'Oʻtkazilgan' },
-          { value: 'cancelled', label: 'Bekor qilingan' },
+          { value: 'cancelled', label: 'Bekor / muddati tugagan' },
         ]} />
         <Select label="Turi" value={type} onChange={(v) => { setType(v); setPage(1) }} options={[
           { value: 'all', label: 'Barchasi' },
@@ -46,10 +66,16 @@ export default function Matches() {
           <label>Qidiruv</label>
           <div className="search" style={{ margin: 0, width: 200 }}>
             <IcSearch className="ic" />
-            <input placeholder="Match, ID (MT-2000)…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
+            <input placeholder="Ishtirokchi, ID…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} />
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="count-note" style={{ padding: '16px 4px', color: '#ff5c6a' }}>
+          Xatolik: {error}
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
@@ -63,17 +89,19 @@ export default function Matches() {
             <tbody>
               {slice.map((m) => (
                 <tr key={m.id} className="clickable" onClick={() => setDetail(m)}>
-                  <td className="cell-sub">{m.id}</td>
+                  <td className="cell-sub">MT-{m.id}</td>
                   <td><span className="tag">{m.type === 'team' ? '👥 Jamoa' : '⚔️ 1v1'}</span></td>
-                  <td><span className="tag">{sportEmoji(m.sport)} {sportName(m.sport)}</span></td>
+                  <td><span className="tag">{m.sportEmoji} {m.sportName}</span></td>
                   <td className="cell-main">{m.a} <span className="cell-sub">vs</span> {m.b}</td>
                   <td className="cell-sub">{m.region} · {m.district}</td>
                   <td className="cell-sub">{m.date} · {m.time}</td>
-                  <td><span className={`pill ${m.status}`}>{statusUz(m.status)}</span></td>
+                  <td><span className={`pill ${m.statusKey}`}>{m.statusLabel}</span></td>
                 </tr>
               ))}
               {total === 0 && (
-                <tr><td colSpan={7}><div className="empty">Match topilmadi</div></td></tr>
+                <tr><td colSpan={7}>
+                  <div className="empty">{loading ? 'Yuklanmoqda…' : 'Match topilmadi'}</div>
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -82,15 +110,12 @@ export default function Matches() {
       </div>
 
       {detail && (
-        <Modal
-          title="Match tafsilotlari"
-          onClose={() => setDetail(null)}
-        >
+        <Modal title="Match tafsilotlari" onClose={() => setDetail(null)}>
           <div className="detail-head">
             <div className="dh-main">
-              <div className="dh-name">{sportEmoji(detail.sport)} {detail.a} <span style={{ color: 'var(--faint)' }}>vs</span> {detail.b}</div>
+              <div className="dh-name">{detail.sportEmoji} {detail.a} <span style={{ color: 'var(--faint)' }}>vs</span> {detail.b}</div>
               <div className="dh-sub">
-                {detail.id} · <span className={`pill ${detail.status}`}>{statusUz(detail.status)}</span>
+                MT-{detail.id} · <span className={`pill ${detail.statusKey}`}>{detail.statusLabel}</span>
               </div>
             </div>
           </div>
@@ -98,7 +123,7 @@ export default function Matches() {
           <div className="kv" style={{ marginTop: 16 }}>
             <div>
               <div className="k">Sport turi</div>
-              <div className="v">{sportEmoji(detail.sport)} {sportName(detail.sport)}</div>
+              <div className="v">{detail.sportEmoji} {detail.sportName}</div>
             </div>
             <div>
               <div className="k">Turi</div>
@@ -118,13 +143,36 @@ export default function Matches() {
             </div>
             <div>
               <div className="k">Tuman</div>
-              <div className="v">{detail.district}</div>
+              <div className="v">{detail.district || '—'}</div>
             </div>
-            <div className="full">
-              <div className="k">Ishtirokchilar</div>
-              <div className="v">{detail.a} · {detail.b}</div>
+            <div>
+              <div className="k">Oʻyinchilar</div>
+              <div className="v">{detail.players.length} / {detail.playersTotal}</div>
+            </div>
+            <div>
+              <div className="k">Hisob</div>
+              <div className="v">{detail.scoreA ?? '—'} : {detail.scoreB ?? '—'}</div>
             </div>
           </div>
+
+          {detail.players.length > 0 && (
+            <>
+              <div className="section-label" style={{ marginTop: 16 }}>Ishtirokchilar</div>
+              <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                {detail.players.map((p) => (
+                  <div key={p.id} className="name-cell" style={{ justifyContent: 'space-between' }}>
+                    <span className="cell-main">
+                      {p.name}{p.isOrganizer && <span className="tag" style={{ marginLeft: 8 }}>Tashkilotchi</span>}
+                    </span>
+                    <span className="cell-sub">
+                      {p.side ? `Jamoa ${p.side.toUpperCase()}` : ''}
+                      {p.attended === true ? ' · keldi' : p.attended === false ? ' · kelmadi' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </>

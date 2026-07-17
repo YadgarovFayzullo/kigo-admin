@@ -469,3 +469,30 @@ tbody tr.clickable:hover { background: var(--panel-2); }
 .matrix tbody tr { border-top: 1px solid var(--border); }
 .matrix td b { font-weight: 750; font-size: 16px; letter-spacing: -0.3px; }
 .matrix .rowlbl { font-weight: 600; color: var(--text); }
+
+/* ---------- Login ---------- */
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  padding: 24px;
+}
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+}
+.login-card .field { display: flex; flex-direction: column; gap: 6px; }
+.login-card .btn.primary { margin-top: 4px; justify-content: center; }
+.login-error {
+  background: rgba(255, 92, 106, 0.12);
+  border: 1px solid rgba(255, 92, 106, 0.4);
+  color: var(--red);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+}

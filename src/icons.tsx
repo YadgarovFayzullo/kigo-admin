@@ -110,3 +110,11 @@ export const IcUnlock = (p: P) => (
     <path d="M8 11V7a4 4 0 0 1 7.5-1.9" />
   </svg>
 )
+
+export const IcLogout = (p: P) => (
+  <svg {...base} className={p.className}>
+    <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3" />
+    <path d="M10 17l-5-5 5-5" />
+    <path d="M5 12h11" />
+  </svg>
+)
