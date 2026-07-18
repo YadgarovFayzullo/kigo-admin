@@ -1,6 +1,6 @@
 // Typed endpoint wrappers. Reference lists are public and paginated;
 // admin resources require a token (see client.setToken).
-import { request, fetchAll, setToken } from './client'
+import { request, fetchAll, fetchCount, setToken } from './client'
 import type {
   ApiSport, ApiRegion, ApiDistrict, ApiStatus, ApiTrustTier,
   ApiProficiency, ApiReportCategory, ApiReportStatus, ApiClubStatus,
@@ -100,18 +100,26 @@ export const updateAdminClub = (id: number, body: Partial<ClubWrite>) =>
 // ---- Admin reports ----
 export interface ReportFilters { q?: string; region?: string; status?: string }
 export const getAdminReports = (f: ReportFilters = {}) =>
-  request<ApiReport[]>('/api/admin/reports/', { query: { ...f } })
+  fetchAll<ApiReport>('/api/admin/reports/', { ...f })
 export const getAdminReport = (id: number) => request<ApiReport>(`/api/admin/reports/${id}/`)
 export const updateAdminReportStatus = (id: number, status: string) =>
   request<ApiReport>(`/api/admin/reports/${id}/`, { method: 'PATCH', body: { status } })
 
 // ---- Admin regions / sports ----
-export const getAdminRegions = () => request<AdminRegion[]>('/api/admin/regions/')
-export const getAdminSports = () => request<AdminSport[]>('/api/admin/sports/')
+export const getAdminRegions = () => fetchAll<AdminRegion>('/api/admin/regions/')
+export const getAdminSports = () => fetchAll<AdminSport>('/api/admin/sports/')
 export const createAdminSport = (body: AdminSportWrite) =>
   request<AdminSport>('/api/admin/sports/', { method: 'POST', body })
 export const setAdminSportActive = (id: number, active: boolean) =>
   request<AdminSport>(`/api/admin/sports/${id}/`, { method: 'PATCH', body: { active } })
+
+// ---- Sidebar badge counts (cheap: reads the paginated `count`, not the rows) ----
+export const countAdminPlayers = () => fetchCount('/api/admin/players/')
+export const countAdminMatches = () => fetchCount('/api/admin/matches/')
+export const countOpenReports = () => fetchCount('/api/admin/reports/', { status: 'open' })
+export const countAdminRegions = () => fetchCount('/api/admin/regions/')
+export const countAdminSports = () => fetchCount('/api/admin/sports/')
+export const countAdminClubs = () => fetchCount('/api/admin/clubs/')
 
 // Stats endpoints are untyped `object` in the schema — shape known only at runtime.
 export const getStatsOverview = () => request<Record<string, unknown>>('/api/admin/stats/overview/')

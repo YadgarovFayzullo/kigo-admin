@@ -3,7 +3,7 @@ import {
   IcDashboard, IcUsers, IcMatch, IcSport, IcClub,
   IcSearch, IcBell, IcSettings, IcCalendar, IcTrend, IcSun, IcMoon, IcLogout,
 } from './icons'
-import { players, matches, clubs, sports, reports, regions, type SportId } from './data'
+import { type SportId } from './data'
 import Dashboard from './pages/Dashboard'
 import Players from './pages/Players'
 import Matches from './pages/Matches'
@@ -13,19 +13,21 @@ import Reports from './pages/Reports'
 import Regions from './pages/Regions'
 import Login from './pages/Login'
 import { useAuth } from './api/auth'
+import {
+  countAdminPlayers, countAdminMatches, countOpenReports,
+  countAdminRegions, countAdminSports, countAdminClubs,
+} from './api/endpoints'
 
 type Route = 'dashboard' | 'players' | 'matches' | 'sports' | 'clubs' | 'reports' | 'regions'
 
-const openReports = reports.filter((r) => r.status === 'open').length
-
-const nav: { id: Route; label: string; icon: React.ReactNode; badge?: string }[] = [
+const nav: { id: Route; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Boshqaruv paneli', icon: <IcDashboard className="ic" /> },
-  { id: 'players', label: 'Oʻyinchilar', icon: <IcUsers className="ic" />, badge: String(players.length) },
-  { id: 'matches', label: 'Matchlar', icon: <IcMatch className="ic" />, badge: String(matches.length) },
-  { id: 'reports', label: 'Shikoyatlar', icon: <IcCalendar className="ic" />, badge: String(openReports) },
-  { id: 'regions', label: 'Hududlar', icon: <IcTrend className="ic" />, badge: String(regions.length) },
-  { id: 'sports', label: 'Sport turlari', icon: <IcSport className="ic" />, badge: String(sports.length) },
-  { id: 'clubs', label: 'Klublar', icon: <IcClub className="ic" />, badge: String(clubs.length) },
+  { id: 'players', label: 'Oʻyinchilar', icon: <IcUsers className="ic" /> },
+  { id: 'matches', label: 'Matchlar', icon: <IcMatch className="ic" /> },
+  { id: 'reports', label: 'Shikoyatlar', icon: <IcCalendar className="ic" /> },
+  { id: 'regions', label: 'Hududlar', icon: <IcTrend className="ic" /> },
+  { id: 'sports', label: 'Sport turlari', icon: <IcSport className="ic" /> },
+  { id: 'clubs', label: 'Klublar', icon: <IcClub className="ic" /> },
 ]
 
 const titles: Record<Route, { h: string; crumb: string }> = {
@@ -46,10 +48,30 @@ export default function App() {
     () => (localStorage.getItem('kigo-theme') as 'dark' | 'light') || 'dark',
   )
 
+  const [counts, setCounts] = useState<Partial<Record<Route, number>>>({})
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('kigo-theme', theme)
   }, [theme])
+
+  // Sidebar badges — only rendered for the routes whose count resolved.
+  useEffect(() => {
+    if (!admin) return // signed out: sidebar is unmounted, stale counts are moot
+    let alive = true
+    ;(async () => {
+      const keys: Route[] = ['players', 'matches', 'reports', 'regions', 'sports', 'clubs']
+      const res = await Promise.allSettled([
+        countAdminPlayers(), countAdminMatches(), countOpenReports(),
+        countAdminRegions(), countAdminSports(), countAdminClubs(),
+      ])
+      if (!alive) return
+      const next: Partial<Record<Route, number>> = {}
+      res.forEach((r, i) => { if (r.status === 'fulfilled') next[keys[i]] = r.value })
+      setCounts(next)
+    })()
+    return () => { alive = false }
+  }, [admin])
 
   if (!ready) return <div className="login-wrap">Yuklanmoqda…</div>
   if (!admin) return <Login />
@@ -76,7 +98,7 @@ export default function App() {
           >
             {n.icon}
             {n.label}
-            {n.badge && <span className="badge">{n.badge}</span>}
+            {counts[n.id] !== undefined && <span className="badge">{counts[n.id]}</span>}
           </button>
         ))}
 

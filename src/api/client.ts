@@ -113,12 +113,23 @@ export interface Paginated<T> {
   results: T[]
 }
 
+// Total row count for a list endpoint, without pulling the rows: asks for a
+// single-item page and reads the paginated `count`.
+export async function fetchCount(path: string, query?: Query): Promise<number> {
+  const data = await request<unknown>(buildUrl(path, { page_size: 1, ...query }))
+  if (Array.isArray(data)) return data.length
+  const count = (data as Paginated<unknown> | null)?.count
+  return typeof count === 'number' ? count : 0
+}
+
 // Fetches a list endpoint tolerant of both shapes DRF may return: a plain array
 // or a paginated envelope. Follows `next` links (forcing https, since the API's
 // own next URLs come back as http and the redirect trips CORS preflight).
 export async function fetchAll<T>(path: string, query?: Query): Promise<T[]> {
   const out: T[] = []
-  let url: string | null = buildUrl(path, query)
+  // The API caps page_size at 100; asking for it up front cuts round-trips
+  // (e.g. 208 districts: 3 requests instead of 21 at the default size of 10).
+  let url: string | null = buildUrl(path, { page_size: 100, ...query })
   while (url) {
     const data: T[] | Paginated<T> = await request<T[] | Paginated<T>>(url)
     if (Array.isArray(data)) { out.push(...data); break }

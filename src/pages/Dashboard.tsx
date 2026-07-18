@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { matchesPerMonth as mockMonths, overview } from '../data'
 import { IcUsers, IcMatch, IcClub, IcTrend } from '../icons'
 import {
   getAdminSports, getAdminRegions, getAdminMatches, getAdminClubs,
-  getMatchesPerMonth,
+  getMatchesPerMonth, getStatsOverview, getStatsSummary,
 } from '../api/endpoints'
 import { adaptSport, adaptRegion, adaptMatch, type MatchRow } from '../api/adapters'
 import type { Sport } from '../data'
@@ -37,6 +36,31 @@ function StatCard({
 
 interface MonthPoint { month: string; value: number }
 
+// The /admin/stats/* payloads are typed `object` in the OpenAPI schema, so the
+// exact field names aren't known ahead of time. We flatten whatever comes back
+// into normalized key → number pairs and look tiles up by a list of plausible
+// names; anything unmatched renders as "—" rather than a made-up number.
+const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+function flattenNums(src: unknown, out: Record<string, number> = {}, depth = 0): Record<string, number> {
+  if (!src || typeof src !== 'object' || depth > 3) return out
+  for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+    const key = normKey(k)
+    if (typeof v === 'number') out[key] = v
+    else if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) out[key] = Number(v)
+    else if (v && typeof v === 'object') flattenNums(v, out, depth + 1)
+  }
+  return out
+}
+
+function pick(stats: Record<string, number>, ...candidates: string[]): number | null {
+  for (const c of candidates) {
+    const k = normKey(c)
+    if (k in stats) return stats[k]
+  }
+  return null
+}
+
 // Best-effort normalization of the untyped /stats/matches-per-month payload.
 function normalizeMonths(raw: unknown): MonthPoint[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null
@@ -54,14 +78,15 @@ export default function Dashboard() {
   const [regions, setRegions] = useState<RegionRow[]>([])
   const [matches, setMatches] = useState<MatchRow[]>([])
   const [clubsCount, setClubsCount] = useState<number | null>(null)
-  const [months, setMonths] = useState<MonthPoint[]>(mockMonths)
+  const [months, setMonths] = useState<MonthPoint[]>([])
+  const [stats, setStats] = useState<Record<string, number>>({})
 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [s, r, m, c, mm] = await Promise.allSettled([
+      const [s, r, m, c, mm, ov, sm] = await Promise.allSettled([
         getAdminSports(), getAdminRegions(), getAdminMatches(), getAdminClubs(),
-        getMatchesPerMonth(),
+        getMatchesPerMonth(), getStatsOverview(), getStatsSummary(),
       ])
       if (!alive) return
       if (s.status === 'fulfilled') setSports(s.value.map((x) => adaptSport(x)))
@@ -72,9 +97,26 @@ export default function Dashboard() {
         const norm = normalizeMonths(mm.value)
         if (norm) setMonths(norm)
       }
+      // Log the raw payloads once so the real field names can be pinned down.
+      const merged: Record<string, number> = {}
+      if (ov.status === 'fulfilled') {
+        console.info('[kigo] /admin/stats/overview/', ov.value)
+        Object.assign(merged, flattenNums(ov.value))
+      }
+      if (sm.status === 'fulfilled') {
+        console.info('[kigo] /admin/stats/summary/', sm.value)
+        Object.assign(merged, flattenNums(sm.value))
+      }
+      setStats(merged)
     })()
     return () => { alive = false }
   }, [])
+
+  // Formats a stat looked up by any of the plausible backend field names.
+  const stat = (...keys: string[]) => {
+    const v = pick(stats, ...keys)
+    return v === null ? '—' : nf.format(v)
+  }
 
   const totalPlayers = sports.reduce((s, x) => s + x.players, 0)
   const confirmed = matches.filter((m) => m.statusKey === 'confirmed' || m.statusKey === 'played').length
@@ -100,12 +142,12 @@ export default function Dashboard() {
             <span className="sub">roʻyxatdan oʻtish va yuklab olishlar</span>
           </div>
           <div className="mini-grid">
-            <Tile val={nf.format(overview.registeredToday)} lbl="Bugun roʻyxatdan oʻtgan" accent="var(--accent)" />
-            <Tile val={nf.format(overview.installs7d)} lbl="7 kunda yuklab olishlar" />
-            <Tile val={nf.format(overview.installs30d)} lbl="30 kunda yuklab olishlar" />
-            <Tile val={nf.format(overview.males)} lbl="Erkaklar soni" accent="#4c9dff" />
-            <Tile val={nf.format(overview.females)} lbl="Ayollar soni" accent="#ff5c9d" />
-            <Tile val={nf.format(overview.activeRequestsNow)} lbl="Hozir aktiv soʻrovlar" accent="var(--accent)" />
+            <Tile val={stat('registered_today', 'today_registered', 'new_users_today', 'users_today', 'registrations_today')} lbl="Bugun roʻyxatdan oʻtgan" accent="var(--accent)" />
+            <Tile val={stat('installs_7d', 'downloads_7d', 'installs_week', 'installs_last_7_days')} lbl="7 kunda yuklab olishlar" />
+            <Tile val={stat('installs_30d', 'downloads_30d', 'installs_month', 'installs_last_30_days')} lbl="30 kunda yuklab olishlar" />
+            <Tile val={stat('males', 'male', 'men', 'male_count', 'male_users')} lbl="Erkaklar soni" accent="#4c9dff" />
+            <Tile val={stat('females', 'female', 'women', 'female_count', 'female_users')} lbl="Ayollar soni" accent="#ff5c9d" />
+            <Tile val={stat('active_requests_now', 'active_requests', 'requests_active', 'open_requests')} lbl="Hozir aktiv soʻrovlar" accent="var(--accent)" />
           </div>
         </div>
 
@@ -115,9 +157,9 @@ export default function Dashboard() {
             <span className="sub">yuborilgan · qabul · rad etilgan</span>
           </div>
           <div className="mini-grid">
-            <Tile val={nf.format(overview.requestsSent)} lbl="Yuborilgan soʻrovlar" />
-            <Tile val={nf.format(overview.requestsAccepted)} lbl="Qabul qilingan" accent="#34d17a" />
-            <Tile val={nf.format(overview.requestsRejected)} lbl="Rad etilgan" accent="#ff5c6a" />
+            <Tile val={stat('requests_sent', 'sent_requests', 'applications_sent', 'applications_total')} lbl="Yuborilgan soʻrovlar" />
+            <Tile val={stat('requests_accepted', 'accepted_requests', 'applications_accepted', 'accepted')} lbl="Qabul qilingan" accent="#34d17a" />
+            <Tile val={stat('requests_rejected', 'rejected_requests', 'applications_rejected', 'rejected')} lbl="Rad etilgan" accent="#ff5c6a" />
           </div>
           <div className="card-h" style={{ margin: '18px 0 8px' }}>
             <h3 style={{ fontSize: 14 }}>Sherik / raqib qidiruvi</h3>
@@ -130,17 +172,17 @@ export default function Dashboard() {
               <tbody>
                 <tr>
                   <td className="rowlbl"><span style={{ color: '#4c9dff' }}>♂</span> Erkaklar</td>
-                  <td><b>{nf.format(overview.menPartner)}</b></td>
-                  <td><b>{nf.format(overview.menOpponent)}</b></td>
+                  <td><b>{stat('men_partner', 'male_partner', 'men_partners')}</b></td>
+                  <td><b>{stat('men_opponent', 'male_opponent', 'men_opponents')}</b></td>
                 </tr>
                 <tr>
                   <td className="rowlbl"><span style={{ color: '#ff5c9d' }}>♀</span> Ayollar</td>
-                  <td><b>{nf.format(overview.womenPartner)}</b></td>
-                  <td><b>{nf.format(overview.womenOpponent)}</b></td>
+                  <td><b>{stat('women_partner', 'female_partner', 'women_partners')}</b></td>
+                  <td><b>{stat('women_opponent', 'female_opponent', 'women_opponents')}</b></td>
                 </tr>
                 <tr>
                   <td className="rowlbl">Aralash (ayol + erkak)</td>
-                  <td colSpan={2}><b>{nf.format(overview.mixedPartnerOpponent)}</b></td>
+                  <td colSpan={2}><b>{stat('mixed_partner_opponent', 'mixed', 'mixed_requests')}</b></td>
                 </tr>
               </tbody>
             </table>
@@ -157,14 +199,18 @@ export default function Dashboard() {
             </div>
             <span className="delta up">↑ 12.4%</span>
           </div>
-          <div className="chart">
-            {months.map((m) => (
-              <div className="bar-col" key={m.month} title={`${m.month}: ${nf.format(m.value)}`}>
-                <div className="bar" style={{ height: `${(m.value / max) * 100}%` }} />
-                <span className="bar-x">{m.month}</span>
-              </div>
-            ))}
-          </div>
+          {months.length === 0 ? (
+            <div className="empty">Maʼlumot yoʻq</div>
+          ) : (
+            <div className="chart">
+              {months.map((m) => (
+                <div className="bar-col" key={m.month} title={`${m.month}: ${nf.format(m.value)}`}>
+                  <div className="bar" style={{ height: `${(m.value / max) * 100}%` }} />
+                  <span className="bar-x">{m.month}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card">
