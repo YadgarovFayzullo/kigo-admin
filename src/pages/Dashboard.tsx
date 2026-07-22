@@ -4,7 +4,8 @@ import {
   getAdminSports, getAdminRegions, getAdminMatches, getAdminClubs,
   getMatchesPerMonth, getStatsOverview, getStatsSummary,
 } from '../api/endpoints'
-import { adaptSport, adaptRegion, adaptMatch, type MatchRow } from '../api/adapters'
+import { adaptSport, adaptRegion, adaptMatch, localized, type MatchRow } from '../api/adapters'
+import { loadRefData } from '../api/refData'
 import type { Sport } from '../data'
 import type { RegionRow } from '../api/adapters'
 
@@ -13,23 +14,22 @@ const nf = new Intl.NumberFormat('ru-RU')
 function Tile({ val, lbl, accent }: { val: string; lbl: string; accent?: string }) {
   return (
     <div className="stat-mini">
-      <b style={accent ? { color: accent } : undefined}>{val}</b>
       <span>{lbl}</span>
+      <b style={accent ? { color: accent } : undefined}>{val}</b>
     </div>
   )
 }
 
 function StatCard({
-  icon, cls, val, lbl, delta,
-}: { icon: React.ReactNode; cls?: string; val: string; lbl: string; delta: string }) {
+  icon, cls, val, lbl,
+}: { icon: React.ReactNode; cls?: string; val: string; lbl: string }) {
   return (
     <div className="card stat">
       <div className="top">
         <div className={`ic-wrap ${cls ?? ''}`}>{icon}</div>
-        <span className="delta up">↑ {delta}</span>
       </div>
-      <div className="val">{val}</div>
       <div className="lbl">{lbl}</div>
+      <div className="val">{val}</div>
     </div>
   )
 }
@@ -89,8 +89,11 @@ export default function Dashboard() {
         getMatchesPerMonth(), getStatsOverview(), getStatsSummary(),
       ])
       if (!alive) return
+      // id → Uzbek name to localize the admin region aggregates (Russian-only name).
+      const uz = new Map((await loadRefData().catch(() => ({ regions: [] })))
+        .regions.map((x) => [x.id, localized(x)]))
       if (s.status === 'fulfilled') setSports(s.value.map((x) => adaptSport(x)))
-      if (r.status === 'fulfilled') setRegions(r.value.map((x) => adaptRegion(x)))
+      if (r.status === 'fulfilled') setRegions(r.value.map((x) => adaptRegion(x, 'uz', uz)))
       if (m.status === 'fulfilled') setMatches(m.value.map((x) => adaptMatch(x)))
       if (c.status === 'fulfilled') setClubsCount(c.value.length)
       if (mm.status === 'fulfilled') {
@@ -122,17 +125,16 @@ export default function Dashboard() {
   const confirmed = matches.filter((m) => m.statusKey === 'confirmed' || m.statusKey === 'played').length
   const max = Math.max(1, ...months.map((m) => m.value))
   const topSports = [...sports].sort((a, b) => b.players - a.players).slice(0, 6)
-  const maxSport = Math.max(1, ...topSports.map((s) => s.players))
   const recent = matches.slice(0, 6)
   const regionStats = [...regions].sort((a, b) => b.users - a.users).slice(0, 6)
 
   return (
     <>
       <div className="grid cols-4">
-        <StatCard icon={<IcUsers />} val={nf.format(totalPlayers)} lbl="Faol oʻyinchilar" delta="12.4%" />
-        <StatCard icon={<IcMatch />} cls="blue" val={nf.format(months.at(-1)?.value ?? matches.length)} lbl="Shu oydagi matchlar" delta="9.1%" />
-        <StatCard icon={<IcClub />} cls="amber" val={String(clubsCount ?? '—')} lbl="Klublar" delta="2 ta" />
-        <StatCard icon={<IcTrend />} cls="green" val="94%" lbl="Match muvaffaqiyati" delta="3.2%" />
+        <StatCard icon={<IcUsers />} val={nf.format(totalPlayers)} lbl="Faol oʻyinchilar" />
+        <StatCard icon={<IcMatch />} cls="blue" val={nf.format(months.at(-1)?.value ?? matches.length)} lbl="Shu oydagi matchlar" />
+        <StatCard icon={<IcClub />} cls="amber" val={String(clubsCount ?? '—')} lbl="Klublar" />
+        <StatCard icon={<IcTrend />} cls="green" val={String(matches.length)} lbl="Jami matchlar" />
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
@@ -197,7 +199,6 @@ export default function Dashboard() {
               <h3>Matchlar dinamikasi</h3>
               <span className="sub">Oxirgi oylar · jami oʻtkazilgan oʻyinlar</span>
             </div>
-            <span className="delta up">↑ 12.4%</span>
           </div>
           {months.length === 0 ? (
             <div className="empty">Maʼlumot yoʻq</div>
@@ -220,12 +221,9 @@ export default function Dashboard() {
           </div>
           {topSports.length === 0 && <div className="empty">Yuklanmoqda…</div>}
           {topSports.map((s) => (
-            <div className="dist-row" key={s.id}>
-              <span className="dname">{s.emoji} {s.name}</span>
-              <span className="track">
-                <span className="fill" style={{ width: `${(s.players / maxSport) * 100}%` }} />
-              </span>
-              <span className="dval">{nf.format(s.players)}</span>
+            <div className="dist-row" key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <span className="dname">{s.name}</span>
+              <span className="dval"><b>{nf.format(s.players)}</b> oʻyinchi</span>
             </div>
           ))}
         </div>
@@ -267,7 +265,7 @@ export default function Dashboard() {
               {recent.map((m) => (
                 <tr key={m.id}>
                   <td className="cell-sub">MT-{m.id}</td>
-                  <td><span className="tag">{m.sportEmoji} {m.sportName}</span></td>
+                  <td><span className="tag">{m.sportName}</span></td>
                   <td className="cell-main">{m.a} <span className="cell-sub">vs</span> {m.b}</td>
                   <td>{m.district || m.region}</td>
                   <td className="cell-sub">{m.date} · {m.time}</td>

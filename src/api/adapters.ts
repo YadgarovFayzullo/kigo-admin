@@ -18,20 +18,12 @@ export function localized(ref: LocalizedRef, lang: Lang = 'uz'): string {
   return ref.code
 }
 
-// Frontend-only metadata: the backend Sport has no emoji or team/solo flag.
-const sportMeta: Record<string, { emoji: string; kind: Sport['kind'] }> = {
-  football: { emoji: '⚽️', kind: 'team' },
-  futbol: { emoji: '⚽️', kind: 'team' },
-  basketball: { emoji: '🏀', kind: 'team' },
-  volleyball: { emoji: '🏐', kind: 'team' },
-  tennis: { emoji: '🎾', kind: 'solo' },
-  badminton: { emoji: '🏸', kind: 'solo' },
-  pingpong: { emoji: '🏓', kind: 'solo' },
-  'ping-pong': { emoji: '🏓', kind: 'solo' },
-  table_tennis: { emoji: '🏓', kind: 'solo' },
-  squash: { emoji: '🎯', kind: 'solo' },
-  padel: { emoji: '🥎', kind: 'solo' },
-  gameclub: { emoji: '🎮', kind: 'solo' },
+// Frontend-only metadata: the backend Sport has no team/solo flag. (Emoji were
+// removed from the UI, so only `kind` remains here.)
+const sportKind: Record<string, Sport['kind']> = {
+  football: 'team', futbol: 'team', basketball: 'team', volleyball: 'team',
+  tennis: 'solo', badminton: 'solo', pingpong: 'solo', 'ping-pong': 'solo',
+  table_tennis: 'solo', squash: 'solo', padel: 'solo', gameclub: 'solo',
 }
 
 /** Accepts the public Sport or the richer AdminSport (players/is_active). */
@@ -39,12 +31,11 @@ export function adaptSport(
   api: ApiSport & { players?: number; is_active?: boolean },
   lang: Lang = 'uz',
 ): Sport {
-  const meta = sportMeta[api.code] ?? { emoji: '🏅', kind: 'solo' as const }
   return {
     id: api.code as SportId,
     name: localized(api, lang),
-    emoji: meta.emoji,
-    kind: meta.kind,
+    emoji: '',
+    kind: sportKind[api.code] ?? 'solo',
     players: api.players ?? 0,
     active: api.is_active ?? true,
   }
@@ -57,10 +48,16 @@ export interface RegionRow {
   clubs: number
 }
 
-/** Public region (no counts) or AdminRegion (with users/clubs). */
-export function adaptRegion(api: ApiRegion | AdminRegion, lang: Lang = 'uz'): RegionRow {
+/** Public region (no counts) or AdminRegion (with users/clubs).
+ *  AdminRegion.name is Russian-only, so pass `localizedById` (from the public
+ *  /regions/ reference) to render the Uzbek name instead. */
+export function adaptRegion(
+  api: ApiRegion | AdminRegion,
+  lang: Lang = 'uz',
+  localizedById?: Map<number, string>,
+): RegionRow {
   if ('users' in api) {
-    return { id: api.id, name: api.name, users: api.users, clubs: api.clubs }
+    return { id: api.id, name: localizedById?.get(api.id) ?? api.name, users: api.users, clubs: api.clubs }
   }
   return { id: api.id, name: localized(api, lang), users: 0, clubs: 0 }
 }
@@ -83,11 +80,10 @@ export function userName(u: ApiUserPublic): string {
   return full || u.username || `#${u.id}`
 }
 
-/** Sport code → { name, emoji, kind }, tolerant of a missing sport. */
+/** Sport code → { name, kind }, tolerant of a missing sport. */
 export function sportDisplay(api: ApiSport | undefined | null, lang: Lang = 'uz') {
-  if (!api) return { code: '', name: '—', emoji: '🏅', kind: 'solo' as const }
-  const meta = sportMeta[api.code] ?? { emoji: '🏅', kind: 'solo' as const }
-  return { code: api.code, name: localized(api, lang), emoji: meta.emoji, kind: meta.kind }
+  if (!api) return { code: '', name: '—', kind: 'solo' as const }
+  return { code: api.code, name: localized(api, lang), kind: sportKind[api.code] ?? 'solo' }
 }
 
 // ---- Players --------------------------------------------------------------
@@ -114,7 +110,6 @@ export interface PlayerRow {
   avatar: [string, string]
   sport: string // sport code (empty when no preferences)
   sportName: string
-  sportEmoji: string
   level: number // proficiency skill level (0–9)
   matches: number // games played
   noShows: number
@@ -140,7 +135,6 @@ export function adaptPlayer(api: AdminPlayer, lang: Lang = 'uz'): PlayerRow {
     avatar: avatarFor(api.id),
     sport: sp.code,
     sportName: sp.name,
-    sportEmoji: sp.emoji,
     level: pref ? Number(pref.proficiency.initial_rating) || 0 : 0,
     matches: api.games_played ?? 0,
     noShows: api.no_shows ?? 0,
@@ -171,7 +165,6 @@ export interface MatchRow {
   type: 'team' | 'solo'
   sport: string
   sportName: string
-  sportEmoji: string
   organizer: string
   a: string
   b: string
@@ -204,7 +197,6 @@ export function adaptMatch(api: AdminMatch, lang: Lang = 'uz'): MatchRow {
     type: sp.kind === 'team' ? 'team' : 'solo',
     sport: sp.code,
     sportName: sp.name,
-    sportEmoji: sp.emoji,
     organizer,
     a: organizer,
     b: others[0]?.name ?? `${players.length}/${api.players_total} ishtirokchi`,
@@ -229,7 +221,6 @@ export interface ClubRow {
   name: string
   sport: string
   sportName: string
-  sportEmoji: string
   region: string
   district: string
   address: string
@@ -250,7 +241,6 @@ export function adaptClub(api: ApiClub, lang: Lang = 'uz'): ClubRow {
     name: api.name,
     sport: sp.code,
     sportName: sp.name,
-    sportEmoji: sp.emoji,
     region: api.region ? localized(api.region, lang) : '—',
     district: api.district ? localized(api.district, lang) : '',
     address: api.address,

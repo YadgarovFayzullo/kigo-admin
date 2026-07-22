@@ -3,6 +3,7 @@
 // filter dropdowns and the region/district/sport selects in create forms.
 import { useEffect, useState } from 'react'
 import { getSports, getRegions, getDistricts } from './endpoints'
+import { localized } from './adapters'
 import type { ApiSport, ApiRegion, ApiDistrict } from './types'
 
 export interface RefData {
@@ -21,6 +22,20 @@ export function loadRefData(): Promise<RefData> {
       .catch((e) => { cache = null; throw e }) // allow a retry on failure
   }
   return cache
+}
+
+/** Cascading district options for a region chosen by its localized name.
+ *  Returns [] when no region is selected, so the district <Select> collapses to
+ *  its "all" option only. */
+export function districtOptionsForRegion(
+  regions: ApiRegion[], districts: ApiDistrict[], regionName: string,
+): { value: string; label: string }[] {
+  if (!regionName || regionName === 'all') return []
+  const sel = regions.find((r) => localized(r) === regionName)
+  if (!sel) return []
+  return districts
+    .filter((d) => d.region_id === sel.id)
+    .map((d) => ({ value: localized(d), label: localized(d) }))
 }
 
 /** React hook wrapping loadRefData; null until loaded. Failures fall back to empty lists. */

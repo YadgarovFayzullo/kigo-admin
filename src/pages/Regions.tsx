@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { IcClub } from '../icons'
 import { getAdminRegions, getRegions } from '../api/endpoints'
-import { adaptRegion, type RegionRow } from '../api/adapters'
+import { adaptRegion, localized, type RegionRow } from '../api/adapters'
+import { useRefData } from '../api/refData'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
 export default function Regions() {
+  const { regions: refRegions } = useRefData()
   const [rows, setRows] = useState<RegionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // id → Uzbek name, so the admin aggregates (Russian-only `name`) can be localized.
+  const uzNames = useMemo(
+    () => new Map(refRegions.map((r) => [r.id, localized(r)])),
+    [refRegions],
+  )
 
   useEffect(() => {
     let alive = true
@@ -18,7 +26,7 @@ export default function Regions() {
         // names only, so counts stay 0 until a token is available.
         let list: RegionRow[]
         try {
-          list = (await getAdminRegions()).map((r) => adaptRegion(r))
+          list = (await getAdminRegions()).map((r) => adaptRegion(r, 'uz', uzNames))
         } catch {
           list = (await getRegions()).map((r) => adaptRegion(r))
         }
@@ -30,7 +38,7 @@ export default function Regions() {
       }
     })()
     return () => { alive = false }
-  }, [])
+  }, [uzNames])
 
   const stats = useMemo(
     () => [...rows].sort((a, b) => b.users - a.users),

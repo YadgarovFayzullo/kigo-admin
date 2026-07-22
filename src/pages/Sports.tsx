@@ -7,7 +7,7 @@ import { adaptSport } from '../api/adapters'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
-const emptySport = { name: '', emoji: '🏅', kind: 'solo' as Sport['kind'] }
+const emptySport = { name: '', emoji: '', kind: 'solo' as Sport['kind'] }
 
 export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => void }) {
   const [list, setList] = useState<Sport[]>([])
@@ -44,7 +44,7 @@ export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => 
   const save = () => {
     const id = (draft.name.toLowerCase().replace(/\s+/g, '-') || `sport-${list.length}`) as SportId
     setList((l) => [...l, {
-      id, name: draft.name, emoji: draft.emoji || '🏅',
+      id, name: draft.name, emoji: '',
       kind: draft.kind, players: 0, active: true,
     }])
     setAdding(false)
@@ -84,7 +84,6 @@ export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => 
               onClick={(e) => { e.stopPropagation(); toggle(s.id) }}
               aria-label="toggle"
             />
-            <div className="emoji">{s.emoji}</div>
             <div className="sname">{s.name}</div>
             <div className="smeta">{s.kind === 'team' ? 'Jamoaviy' : 'Yakkama-yakka'}</div>
             <div className="splayers">{nf.format(s.players)}</div>
@@ -105,11 +104,7 @@ export default function Sports({ onOpenSport }: { onOpenSport: (id: SportId) => 
           }
         >
           <div className="form-grid">
-            <div className="field" style={{ maxWidth: 90 }}>
-              <label>Emoji</label>
-              <input className="input" value={draft.emoji} maxLength={4} onChange={(e) => setDraft((d) => ({ ...d, emoji: e.target.value }))} placeholder="⚽️" />
-            </div>
-            <div className="field">
+            <div className="field full">
               <label>Nomi *</label>
               <input className="input" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="Masalan: Golf" />
             </div>

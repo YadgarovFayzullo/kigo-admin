@@ -1,34 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { type SportId } from '../data'
-import { IcSearch, IcDownload, IcPlus, IcBlock, IcUnlock } from '../icons'
+import { IcSearch, IcDownload, IcBlock, IcUnlock } from '../icons'
 import { Avatar, Select, Pager, usePagination, Modal } from '../ui'
 import {
-  getAdminPlayers, createAdminPlayer, blockAdminPlayer, unblockAdminPlayer,
+  getAdminPlayers, blockAdminPlayer, unblockAdminPlayer,
 } from '../api/endpoints'
 import {
   adaptPlayer, sportDisplay, localized, type PlayerRow, type PlayerStatus,
 } from '../api/adapters'
-import { useRefData } from '../api/refData'
-import type { AdminPlayerWrite, Gender } from '../api/types'
+import { useRefData, districtOptionsForRegion } from '../api/refData'
 
 const statusUz: Record<PlayerStatus, string> = {
   active: 'Faol', blocked: 'Bloklangan', pending: 'Kutilmoqda',
-}
-
-interface Draft {
-  name: string
-  surname: string
-  username: string
-  phone: string
-  gender: Gender
-  age: number
-  region_id: number | ''
-  district_id: number | ''
-}
-
-const emptyDraft: Draft = {
-  name: '', surname: '', username: '', phone: '', gender: 'male', age: 18,
-  region_id: '', district_id: '',
 }
 
 export default function Players({ initialSport = null }: { initialSport?: SportId | null }) {
@@ -39,14 +22,12 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [region, setRegion] = useState('all')
+  const [district, setDistrict] = useState('all')
   const [gender, setGender] = useState('all')
   const [sport, setSport] = useState<string>(initialSport ?? 'all')
   const [confirm, setConfirm] = useState<PlayerRow | null>(null) // pending block/unblock
   const [busyId, setBusyId] = useState<number | null>(null)
   const [profile, setProfile] = useState<PlayerRow | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState<Draft>(emptyDraft)
-  const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -66,45 +47,16 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
 
   const sportOpts = useMemo(() => [
     { value: 'all', label: 'Barcha sportlar' },
-    ...sports.map((s) => { const d = sportDisplay(s); return { value: d.code, label: `${d.emoji} ${d.name}` } }),
+    ...sports.map((s) => { const d = sportDisplay(s); return { value: d.code, label: d.name } }),
   ], [sports])
   const regionOpts = useMemo(() => [
     { value: 'all', label: 'Barcha hududlar' },
     ...regions.map((r) => ({ value: localized(r), label: localized(r) })),
   ], [regions])
-
-  const setD = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
-  const districtOpts = useMemo(
-    () => districts.filter((d) => d.region_id === draft.region_id),
-    [districts, draft.region_id],
-  )
-  const validPlayer = draft.name.trim() && draft.phone.trim()
-
-  const savePlayer = async () => {
-    if (!validPlayer) return
-    setSaving(true)
-    setSaveErr(null)
-    try {
-      const body: AdminPlayerWrite = {
-        name: draft.name.trim(),
-        surname: draft.surname.trim() || undefined,
-        username: draft.username.trim() || undefined,
-        phone: draft.phone.trim(),
-        gender: draft.gender,
-        age: draft.age,
-        ...(draft.region_id !== '' ? { region_id: Number(draft.region_id) } : {}),
-        ...(draft.district_id !== '' ? { district_id: Number(draft.district_id) } : {}),
-      }
-      const created = adaptPlayer(await createAdminPlayer(body))
-      setList((l) => [created, ...l])
-      setAdding(false)
-      setDraft(emptyDraft)
-    } catch (e) {
-      setSaveErr(e instanceof Error ? e.message : 'Saqlashda xatolik')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const districtOpts = useMemo(() => [
+    { value: 'all', label: 'Barcha tumanlar' },
+    ...districtOptionsForRegion(regions, districts, region),
+  ], [regions, districts, region])
 
   // Block a user, or restore a blocked one — persisted server-side.
   const toggleBlock = async (p: PlayerRow) => {
@@ -126,11 +78,12 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
   const rows = useMemo(() => list.filter((p) => {
     if (status !== 'all' && p.status !== status) return false
     if (region !== 'all' && p.region !== region) return false
+    if (district !== 'all' && p.district !== district) return false
     if (gender !== 'all' && p.gender !== gender) return false
     if (sport !== 'all' && p.sport !== sport) return false
     if (q && !`${p.name} ${p.phone} ${p.district} ${p.id}`.toLowerCase().includes(q.toLowerCase())) return false
     return true
-  }), [list, q, status, region, gender, sport])
+  }), [list, q, status, region, district, gender, sport])
 
   const { slice, page, pages, total, setPage } = usePagination(rows)
 
@@ -144,7 +97,8 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
           { value: 'blocked', label: 'Bloklangan' },
         ]} />
         <Select label="Sport" value={sport} onChange={(v) => { setSport(v); setPage(1) }} options={sportOpts} />
-        <Select label="Hudud" value={region} onChange={(v) => { setRegion(v); setPage(1) }} options={regionOpts} />
+        <Select label="Hudud" value={region} onChange={(v) => { setRegion(v); setDistrict('all'); setPage(1) }} options={regionOpts} />
+        <Select label="Tuman" value={district} onChange={(v) => { setDistrict(v); setPage(1) }} options={districtOpts} />
         <Select label="Jins" value={gender} onChange={(v) => { setGender(v); setPage(1) }} options={[
           { value: 'all', label: 'Barchasi' },
           { value: 'male', label: 'Erkak' },
@@ -159,11 +113,6 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
         </div>
         <div className="field mla" style={{ justifyContent: 'flex-end' }}>
           <button className="btn ghost"><IcDownload /> Eksport</button>
-        </div>
-        <div className="field" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn primary" onClick={() => { setDraft(emptyDraft); setSaveErr(null); setAdding(true) }}>
-            <IcPlus /> Qoʻshish
-          </button>
         </div>
       </div>
 
@@ -203,7 +152,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
                   </td>
                   <td>{p.age || '—'}</td>
                   <td className="cell-sub">{p.phone}</td>
-                  <td>{p.sport ? <span className="tag">{p.sportEmoji} {p.sportName}</span> : <span className="cell-sub">—</span>}</td>
+                  <td>{p.sport ? <span className="tag">{p.sportName}</span> : <span className="cell-sub">—</span>}</td>
                   <td><span className="lvl">{p.level.toFixed(1)}</span></td>
                   <td>{p.matches}</td>
                   <td>{p.rating ? p.rating.toFixed(0) : '—'}</td>
@@ -234,66 +183,6 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
         </div>
         <Pager page={page} pages={pages} total={total} onChange={setPage} />
       </div>
-
-      {adding && (
-        <Modal
-          title="Yangi oʻyinchi qoʻshish"
-          onClose={() => setAdding(false)}
-          footer={
-            <>
-              <button className="btn ghost" onClick={() => setAdding(false)}>Bekor qilish</button>
-              <button className="btn primary" disabled={!validPlayer || saving} onClick={savePlayer}>
-                {saving ? 'Saqlanmoqda…' : 'Saqlash'}
-              </button>
-            </>
-          }
-        >
-          <div className="form-grid">
-            <div className="field">
-              <label>Ism *</label>
-              <input className="input" value={draft.name} onChange={(e) => setD({ name: e.target.value })} placeholder="Sardor" />
-            </div>
-            <div className="field">
-              <label>Familiya</label>
-              <input className="input" value={draft.surname} onChange={(e) => setD({ surname: e.target.value })} placeholder="Usmonov" />
-            </div>
-            <div className="field">
-              <label>Telefon *</label>
-              <input className="input" value={draft.phone} onChange={(e) => setD({ phone: e.target.value })} placeholder="+998901234567" />
-            </div>
-            <div className="field">
-              <label>Username</label>
-              <input className="input" value={draft.username} onChange={(e) => setD({ username: e.target.value })} placeholder="sardor_u" />
-            </div>
-            <div className="field">
-              <label>Jins</label>
-              <select className="select" value={draft.gender} onChange={(e) => setD({ gender: e.target.value as Gender })}>
-                <option value="male">Erkak</option>
-                <option value="female">Ayol</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Yosh</label>
-              <input className="input" type="number" min={10} max={90} value={draft.age} onChange={(e) => setD({ age: Number(e.target.value) })} />
-            </div>
-            <div className="field">
-              <label>Viloyat</label>
-              <select className="select" value={draft.region_id} onChange={(e) => setD({ region_id: e.target.value ? Number(e.target.value) : '', district_id: '' })}>
-                <option value="">— tanlang —</option>
-                {regions.map((r) => <option key={r.id} value={r.id}>{localized(r)}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label>Tuman</label>
-              <select className="select" value={draft.district_id} disabled={draft.region_id === ''} onChange={(e) => setD({ district_id: e.target.value ? Number(e.target.value) : '' })}>
-                <option value="">— tanlang —</option>
-                {districtOpts.map((d) => <option key={d.id} value={d.id}>{localized(d)}</option>)}
-              </select>
-            </div>
-            {saveErr && <div className="field full"><div className="login-error">{saveErr}</div></div>}
-          </div>
-        </Modal>
-      )}
 
       {profile && (
         <Modal
@@ -330,7 +219,7 @@ export default function Players({ initialSport = null }: { initialSport?: SportI
           <div className="kv">
             <div>
               <div className="k">Sport turi</div>
-              <div className="v">{profile.sport ? `${profile.sportEmoji} ${profile.sportName}` : '—'}</div>
+              <div className="v">{profile.sport ? profile.sportName : '—'}</div>
             </div>
             <div>
               <div className="k">Daraja</div>

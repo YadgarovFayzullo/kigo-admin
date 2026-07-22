@@ -7,7 +7,7 @@ import {
 import {
   adaptClub, localized, userName, avatarFor, type ClubRow,
 } from '../api/adapters'
-import { useRefData } from '../api/refData'
+import { useRefData, districtOptionsForRegion } from '../api/refData'
 import type { ApiUserPublic, ClubWrite } from '../api/types'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -42,6 +42,7 @@ export default function Clubs() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [region, setRegion] = useState('all')
+  const [district, setDistrict] = useState('all')
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState<Draft>(emptyDraft)
   const [saving, setSaving] = useState(false)
@@ -67,10 +68,16 @@ export default function Clubs() {
     { value: 'all', label: 'Barcha hududlar' },
     ...regions.map((r) => ({ value: localized(r), label: localized(r) })),
   ], [regions])
+  const districtFilterOpts = useMemo(() => [
+    { value: 'all', label: 'Barcha tumanlar' },
+    ...districtOptionsForRegion(regions, districts, region),
+  ], [regions, districts, region])
 
   const rows = useMemo(
-    () => list.filter((c) => region === 'all' || c.region === region),
-    [list, region],
+    () => list.filter((c) =>
+      (region === 'all' || c.region === region) &&
+      (district === 'all' || c.district === district)),
+    [list, region, district],
   )
   const { slice, page, pages, total, setPage } = usePagination(rows)
 
@@ -78,7 +85,7 @@ export default function Clubs() {
   const totalCourts = rows.reduce((s, c) => s + c.courts, 0)
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
-  const districtOpts = useMemo(
+  const formDistrictOpts = useMemo(
     () => districts.filter((d) => d.region_id === draft.region_id),
     [districts, draft.region_id],
   )
@@ -121,7 +128,8 @@ export default function Clubs() {
   return (
     <>
       <div className="toolbar">
-        <Select label="Hudud" value={region} onChange={(v) => { setRegion(v); setPage(1) }} options={regionOpts} />
+        <Select label="Hudud" value={region} onChange={(v) => { setRegion(v); setDistrict('all'); setPage(1) }} options={regionOpts} />
+        <Select label="Tuman" value={district} onChange={(v) => { setDistrict(v); setPage(1) }} options={districtFilterOpts} />
         <span className="count-note" style={{ alignSelf: 'flex-end', paddingBottom: 9 }}>
           {rows.length} ta klub · {totalCourts} ta maydon · {nf.format(totalBookings)} ta bron
         </span>
@@ -154,12 +162,12 @@ export default function Clubs() {
                     <div className="cell-main">{c.name}</div>
                     <div className="cell-sub">CL-{c.id} · {c.since}</div>
                   </td>
-                  <td><span className="tag">{c.sportEmoji} {c.sportName}</span></td>
+                  <td><span className="tag">{c.sportName}</span></td>
                   <td className="cell-sub">{c.region}</td>
                   <td>
                     <div>{c.district}</div>
                     <div className="cell-sub">{c.address}</div>
-                    {c.lat && c.lng && <div className="cell-sub" style={{ fontSize: 11 }}>📍 {c.lat}, {c.lng}</div>}
+                    {c.lat && c.lng && <div className="cell-sub" style={{ fontSize: 11 }}>{c.lat}, {c.lng}</div>}
                   </td>
                   <td>
                     <div className="cell-main">{c.admin.name || '—'}</div>
@@ -225,7 +233,7 @@ export default function Clubs() {
               <label>Tuman</label>
               <select className="select" value={draft.district_id} disabled={draft.region_id === ''} onChange={(e) => set({ district_id: e.target.value ? Number(e.target.value) : '' })}>
                 <option value="">— tanlang —</option>
-                {districtOpts.map((d) => <option key={d.id} value={d.id}>{localized(d)}</option>)}
+                {formDistrictOpts.map((d) => <option key={d.id} value={d.id}>{localized(d)}</option>)}
               </select>
             </div>
             <div className="field full">
@@ -292,9 +300,9 @@ function ClubDetail({ club: c, onBack }: { club: ClubRow; onBack: () => void }) 
         <div className="detail-head">
           <div className="pin" style={{
             width: 56, height: 56, borderRadius: 14, flex: 'none',
-            display: 'grid', placeItems: 'center', fontSize: 26,
+            display: 'grid', placeItems: 'center', fontSize: 22, fontWeight: 700,
             background: 'var(--panel-2)', border: '1px solid var(--border-2)',
-          }}>{c.sportEmoji}</div>
+          }}>{c.name.charAt(0).toUpperCase()}</div>
           <div className="dh-main">
             <div className="dh-name">{c.name}</div>
             <div className="dh-sub">
@@ -314,7 +322,7 @@ function ClubDetail({ club: c, onBack }: { club: ClubRow; onBack: () => void }) 
           <div><div className="k">Viloyat</div><div className="v">{c.region}</div></div>
           <div><div className="k">Tuman</div><div className="v">{c.district || '—'}</div></div>
           <div className="full"><div className="k">Manzil</div><div className="v">{c.address}</div></div>
-          {c.lat && c.lng && <div><div className="k">Koordinatalar</div><div className="v">📍 {c.lat}, {c.lng}</div></div>}
+          {c.lat && c.lng && <div><div className="k">Koordinatalar</div><div className="v">{c.lat}, {c.lng}</div></div>}
         </div>
 
         <div className="section-label">Admin kontaktlari</div>
