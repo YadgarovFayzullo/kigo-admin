@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { IcPlus, IcArrowLeft } from '../icons'
 import { Select, Pager, usePagination, Modal, Avatar } from '../ui'
+import { MapPicker } from '../MapPicker'
 import {
-  getAdminClubs, getAdminClubPlayers, createAdminClub,
+  getAdminClubs, getAdminClubPlayers, createAdminClub, getClubStatuses,
 } from '../api/endpoints'
 import {
   adaptClub, localized, userName, avatarFor, type ClubRow,
 } from '../api/adapters'
 import { useRefData, districtOptionsForRegion } from '../api/refData'
-import type { ApiUserPublic, ClubWrite } from '../api/types'
+import type { ApiClubStatus, ApiUserPublic, ClubWrite } from '../api/types'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
@@ -28,12 +29,13 @@ interface Draft {
   admin_name: string
   admin_phone: string
   admin_email: string
+  status_id: number | ''
 }
 
 const emptyDraft: Draft = {
   name: '', sport_id: '', region_id: '', district_id: '', address: '',
   latitude: '', longitude: '', courts: 1,
-  admin_name: '', admin_phone: '', admin_email: '',
+  admin_name: '', admin_phone: '', admin_email: '', status_id: '',
 }
 
 export default function Clubs() {
@@ -48,6 +50,9 @@ export default function Clubs() {
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<ClubRow | null>(null)
+  // Club statuses come from the /api/club-statuses/ reference — the form sends
+  // the picked status_id, so the list can't be hardcoded.
+  const [statuses, setStatuses] = useState<ApiClubStatus[]>([])
 
   useEffect(() => {
     let alive = true
@@ -61,6 +66,12 @@ export default function Clubs() {
         if (alive) setLoading(false)
       }
     })()
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    getClubStatuses().then((s) => { if (alive) setStatuses(s) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -110,6 +121,7 @@ export default function Clubs() {
         ...(draft.district_id !== '' ? { district_id: Number(draft.district_id) } : {}),
         ...(draft.latitude ? { latitude: draft.latitude } : {}),
         ...(draft.longitude ? { longitude: draft.longitude } : {}),
+        ...(draft.status_id !== '' ? { status_id: Number(draft.status_id) } : {}),
       }
       const created = adaptClub(await createAdminClub(body))
       setList((l) => [created, ...l])
@@ -134,7 +146,15 @@ export default function Clubs() {
           {rows.length} ta klub · {totalCourts} ta maydon · {nf.format(totalBookings)} ta bron
         </span>
         <div className="field mla" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn primary" onClick={() => { setDraft(emptyDraft); setSaveErr(null); setAdding(true) }}>
+          <button
+            className="btn primary"
+            onClick={() => {
+              // Default to "Faol" when that status exists in the reference.
+              setDraft({ ...emptyDraft, status_id: statuses.find((s) => s.code === 'active')?.id ?? '' })
+              setSaveErr(null)
+              setAdding(true)
+            }}
+          >
             <IcPlus /> Klub qoʻshish
           </button>
         </div>
@@ -212,13 +232,30 @@ export default function Clubs() {
             <div className="field">
               <label>Sport turi *</label>
               <select className="select" value={draft.sport_id} onChange={(e) => set({ sport_id: e.target.value ? Number(e.target.value) : '' })}>
-                <option value="">— tanlang —</option>
-                {sports.map((s) => <option key={s.id} value={s.id}>{localized(s)}</option>)}
+                <option value="">
+                  {sports.length ? '— tanlang —' : '— sport turlari yuklanmadi —'}
+                </option>
+                {sports.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {localized(s)}{s.is_active === false ? ' (yashirilgan)' : ''}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="field">
               <label>Maydonlar soni</label>
               <input className="input" type="number" min={1} value={draft.courts} onChange={(e) => set({ courts: Number(e.target.value) })} />
+            </div>
+            <div className="field full">
+              <label>Holat</label>
+              <select
+                className="select"
+                value={draft.status_id}
+                onChange={(e) => set({ status_id: e.target.value ? Number(e.target.value) : '' })}
+              >
+                <option value="">— server standarti —</option>
+                {statuses.map((s) => <option key={s.id} value={s.id}>{localized(s)}</option>)}
+              </select>
             </div>
 
             <div className="form-section">Lokatsiya</div>
@@ -240,13 +277,14 @@ export default function Clubs() {
               <label>Manzil (koʻcha, uy) *</label>
               <input className="input" value={draft.address} onChange={(e) => set({ address: e.target.value })} placeholder="Amir Temur koʻch. 108" />
             </div>
-            <div className="field">
-              <label>Kenglik (lat)</label>
-              <input className="input" value={draft.latitude} onChange={(e) => set({ latitude: e.target.value })} placeholder="41.3111" />
-            </div>
-            <div className="field">
-              <label>Uzunlik (lng)</label>
-              <input className="input" value={draft.longitude} onChange={(e) => set({ longitude: e.target.value })} placeholder="69.2797" />
+            <div className="field full">
+              <label>Xaritadagi joylashuv</label>
+              <MapPicker
+                lat={draft.latitude}
+                lng={draft.longitude}
+                query={draft.address}
+                onChange={({ lat, lng }) => set({ latitude: lat, longitude: lng })}
+              />
             </div>
 
             <div className="form-section">Admin kontaktlari</div>

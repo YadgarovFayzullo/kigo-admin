@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react'
 import { IcUsers, IcMatch, IcClub, IcTrend } from '../icons'
 import {
-  getAdminSports, getAdminRegions, getAdminMatches, getAdminClubs,
+  getAdminSports, getAdminRegions, getAdminMatches, getAdminClubs, getAdminPlayers,
   getMatchesPerMonth, getStatsOverview, getStatsSummary,
 } from '../api/endpoints'
-import { adaptSport, adaptRegion, adaptMatch, localized, type MatchRow } from '../api/adapters'
+import {
+  adaptSport, adaptRegion, adaptMatch, adaptPlayer, localized,
+  type MatchRow, type PlayerRow, type PlayerStatus,
+} from '../api/adapters'
 import { loadRefData } from '../api/refData'
+import { Avatar } from '../ui'
 import type { Sport } from '../data'
 import type { RegionRow } from '../api/adapters'
+
+const statusUz: Record<PlayerStatus, string> = {
+  active: 'Faol', blocked: 'Bloklangan', pending: 'Kutilmoqda',
+}
 
 const nf = new Intl.NumberFormat('ru-RU')
 
@@ -73,10 +81,12 @@ function normalizeMonths(raw: unknown): MonthPoint[] | null {
   return out.length ? out : null
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onOpenPlayers }: { onOpenPlayers?: () => void }) {
   const [sports, setSports] = useState<Sport[]>([])
   const [regions, setRegions] = useState<RegionRow[]>([])
   const [matches, setMatches] = useState<MatchRow[]>([])
+  const [players, setPlayers] = useState<PlayerRow[]>([])
+  const [playersLoading, setPlayersLoading] = useState(true)
   const [clubsCount, setClubsCount] = useState<number | null>(null)
   const [months, setMonths] = useState<MonthPoint[]>([])
   const [stats, setStats] = useState<Record<string, number>>({})
@@ -84,9 +94,9 @@ export default function Dashboard() {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [s, r, m, c, mm, ov, sm] = await Promise.allSettled([
+      const [s, r, m, c, p, mm, ov, sm] = await Promise.allSettled([
         getAdminSports(), getAdminRegions(), getAdminMatches(), getAdminClubs(),
-        getMatchesPerMonth(), getStatsOverview(), getStatsSummary(),
+        getAdminPlayers(), getMatchesPerMonth(), getStatsOverview(), getStatsSummary(),
       ])
       if (!alive) return
       // id → Uzbek name to localize the admin region aggregates (Russian-only name).
@@ -96,6 +106,8 @@ export default function Dashboard() {
       if (r.status === 'fulfilled') setRegions(r.value.map((x) => adaptRegion(x, 'uz', uz)))
       if (m.status === 'fulfilled') setMatches(m.value.map((x) => adaptMatch(x)))
       if (c.status === 'fulfilled') setClubsCount(c.value.length)
+      if (p.status === 'fulfilled') setPlayers(p.value.map((x) => adaptPlayer(x)))
+      setPlayersLoading(false)
       if (mm.status === 'fulfilled') {
         const norm = normalizeMonths(mm.value)
         if (norm) setMonths(norm)
@@ -121,7 +133,14 @@ export default function Dashboard() {
     return v === null ? '—' : nf.format(v)
   }
 
-  const totalPlayers = sports.reduce((s, x) => s + x.players, 0)
+  // Sports aggregate counts sport preferences (multi-sport users counted twice),
+  // so prefer the real player list when it loaded.
+  const totalPlayers = players.length || sports.reduce((s, x) => s + x.players, 0)
+  const activePlayers = players.filter((p) => p.status === 'active').length
+  // The players endpoint has no ordering param, so newest-first is done here.
+  const recentPlayers = [...players]
+    .sort((a, b) => (b.joined.localeCompare(a.joined) || b.id - a.id))
+    .slice(0, 8)
   const confirmed = matches.filter((m) => m.statusKey === 'confirmed' || m.statusKey === 'played').length
   const max = Math.max(1, ...months.map((m) => m.value))
   const topSports = [...sports].sort((a, b) => b.players - a.players).slice(0, 6)
@@ -131,7 +150,11 @@ export default function Dashboard() {
   return (
     <>
       <div className="grid cols-4">
-        <StatCard icon={<IcUsers />} val={nf.format(totalPlayers)} lbl="Faol oʻyinchilar" />
+        <StatCard
+          icon={<IcUsers />}
+          val={nf.format(players.length ? activePlayers : totalPlayers)}
+          lbl="Faol oʻyinchilar"
+        />
         <StatCard icon={<IcMatch />} cls="blue" val={nf.format(months.at(-1)?.value ?? matches.length)} lbl="Shu oydagi matchlar" />
         <StatCard icon={<IcClub />} cls="amber" val={String(clubsCount ?? '—')} lbl="Klublar" />
         <StatCard icon={<IcTrend />} cls="green" val={String(matches.length)} lbl="Jami matchlar" />
@@ -193,7 +216,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
-        <div className="card">
+        <div className="card chart-card">
           <div className="card-h">
             <div>
               <h3>Matchlar dinamikasi</h3>
@@ -201,7 +224,7 @@ export default function Dashboard() {
             </div>
           </div>
           {months.length === 0 ? (
-            <div className="empty">Maʼlumot yoʻq</div>
+            <div className="chart-empty">Maʼlumot yoʻq</div>
           ) : (
             <div className="chart">
               {months.map((m) => (
@@ -245,6 +268,61 @@ export default function Dashboard() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-h">
+          <h3>Soʻnggi foydalanuvchilar</h3>
+          {onOpenPlayers ? (
+            <button className="btn ghost" onClick={onOpenPlayers}>
+              Barchasi{players.length ? ` (${nf.format(players.length)})` : ''}
+            </button>
+          ) : (
+            <span className="sub">oxirgi roʻyxatdan oʻtganlar</span>
+          )}
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Oʻyinchi</th><th>Jins</th><th>Yosh</th><th>Telefon</th>
+                <th>Sport</th><th>Hudud</th><th>Roʻyxatdan oʻtgan</th><th>Holat</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentPlayers.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <div className="name-cell">
+                      <Avatar name={p.name} colors={p.avatar} size={32} />
+                      <div style={{ marginLeft: 10 }}>
+                        <div className="cell-main">{p.name}</div>
+                        <div className="cell-sub">#{p.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{ color: p.gender === 'female' ? '#ff5c9d' : '#4c9dff', fontWeight: 700 }}>
+                      {p.gender === 'female' ? '♀' : '♂'}
+                    </span>{' '}
+                    {p.gender === 'female' ? 'Ayol' : 'Erkak'}
+                  </td>
+                  <td>{p.age || '—'}</td>
+                  <td className="cell-sub">{p.phone}</td>
+                  <td>{p.sport ? <span className="tag">{p.sportName}</span> : <span className="cell-sub">—</span>}</td>
+                  <td className="cell-sub">{p.region}{p.district ? <><br /><span style={{ fontSize: 11 }}>{p.district}</span></> : null}</td>
+                  <td className="cell-sub">{p.joined || '—'}</td>
+                  <td><span className={`pill ${p.status}`}>{statusUz[p.status]}</span></td>
+                </tr>
+              ))}
+              {recentPlayers.length === 0 && (
+                <tr><td colSpan={8}>
+                  <div className="empty">{playersLoading ? 'Yuklanmoqda…' : 'Foydalanuvchi topilmadi'}</div>
+                </td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

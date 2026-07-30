@@ -20,6 +20,22 @@ import {
 
 type Route = 'dashboard' | 'players' | 'matches' | 'sports' | 'clubs' | 'reports' | 'regions'
 
+const ROUTES: Route[] = ['dashboard', 'players', 'matches', 'sports', 'clubs', 'reports', 'regions']
+
+// The panel has no router dependency: the route lives in the URL path and is
+// kept in sync with History API pushState + a popstate listener, so the address
+// bar, browser back/forward and reload/deep links all work.
+// Dashboard is the root path; `?sport=<code>` carries the players page's filter.
+const pathOf = (route: Route, sport: SportId | null) =>
+  `/${route === 'dashboard' ? '' : route}${sport ? `?sport=${encodeURIComponent(sport)}` : ''}`
+
+function readLocation(): { route: Route; sport: SportId | null } {
+  const seg = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0]
+  const route = (ROUTES as string[]).includes(seg) ? (seg as Route) : 'dashboard'
+  const sport = new URLSearchParams(window.location.search).get('sport')
+  return { route, sport: route === 'players' && sport ? (sport as SportId) : null }
+}
+
 const nav: { id: Route; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Boshqaruv paneli', icon: <IcDashboard className="ic" /> },
   { id: 'players', label: 'Oʻyinchilar', icon: <IcUsers className="ic" /> },
@@ -42,8 +58,10 @@ const titles: Record<Route, { h: string; crumb: string }> = {
 
 export default function App() {
   const { admin, ready, logout } = useAuth()
-  const [route, setRoute] = useState<Route>('dashboard')
-  const [sportFocus, setSportFocus] = useState<SportId | null>(null)
+  const [{ route, sportFocus }, setNav] = useState(() => {
+    const { route, sport } = readLocation()
+    return { route, sportFocus: sport }
+  })
   const [theme, setTheme] = useState<'dark' | 'light'>(
     () => (localStorage.getItem('kigo-theme') as 'dark' | 'light') || 'dark',
   )
@@ -54,6 +72,28 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('kigo-theme', theme)
   }, [theme])
+
+  // Browser back/forward.
+  useEffect(() => {
+    const onPop = () => {
+      const { route, sport } = readLocation()
+      setNav({ route, sportFocus: sport })
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  // Normalize the address bar to what's actually rendered — /login while signed
+  // out, the route path otherwise (so /login turns back into the route after
+  // signing in, and unknown paths land on the dashboard). replaceState, so this
+  // never adds a history entry.
+  useEffect(() => {
+    if (!ready) return
+    const target = admin ? pathOf(route, sportFocus) : '/login'
+    if (window.location.pathname + window.location.search !== target) {
+      window.history.replaceState(null, '', target)
+    }
+  }, [ready, admin, route, sportFocus])
 
   // Sidebar badges — only rendered for the routes whose count resolved.
   useEffect(() => {
@@ -72,6 +112,12 @@ export default function App() {
     })()
     return () => { alive = false }
   }, [admin])
+
+  // Navigate: pushes a history entry, so back/forward walk the visited pages.
+  const go = (next: Route, sport: SportId | null = null) => {
+    window.history.pushState(null, '', pathOf(next, sport))
+    setNav({ route: next, sportFocus: sport })
+  }
 
   if (!ready) return <div className="login-wrap">Yuklanmoqda…</div>
   if (!admin) return <Login />
@@ -94,7 +140,7 @@ export default function App() {
           <button
             key={n.id}
             className={`nav-item ${route === n.id ? 'active' : ''}`}
-            onClick={() => { setRoute(n.id); if (n.id === 'players') setSportFocus(null) }}
+            onClick={() => go(n.id)}
           >
             {n.icon}
             {n.label}
@@ -137,14 +183,12 @@ export default function App() {
         </header>
 
         <main className="content">
-          {route === 'dashboard' && <Dashboard />}
+          {route === 'dashboard' && <Dashboard onOpenPlayers={() => go('players')} />}
           {route === 'players' && <Players key={sportFocus ?? 'all'} initialSport={sportFocus} />}
           {route === 'matches' && <Matches />}
           {route === 'reports' && <Reports />}
           {route === 'regions' && <Regions />}
-          {route === 'sports' && (
-            <Sports onOpenSport={(id) => { setSportFocus(id); setRoute('players') }} />
-          )}
+          {route === 'sports' && <Sports onOpenSport={(id) => go('players', id)} />}
           {route === 'clubs' && <Clubs />}
         </main>
       </div>

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useAuth } from '../api/auth'
+import { IcEye, IcEyeOff } from '../icons'
 
 export default function Login() {
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,15 +48,28 @@ export default function Login() {
         </div>
         <div className="field">
           <label>Parol</label>
-          <input
-            className="input"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            required
-          />
+          <div className="pw-wrap">
+            <input
+              className="input pw-input"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+            <button
+              type="button"
+              className="pw-toggle"
+              onClick={() => setShowPassword((v) => !v)}
+              title={showPassword ? 'Parolni yashirish' : 'Parolni ko‘rsatish'}
+              aria-label={showPassword ? 'Parolni yashirish' : 'Parolni ko‘rsatish'}
+              aria-pressed={showPassword}
+              tabIndex={-1}
+            >
+              {showPassword ? <IcEyeOff /> : <IcEye />}
+            </button>
+          </div>
         </div>
 
         {error && <div className="login-error">{error}</div>}

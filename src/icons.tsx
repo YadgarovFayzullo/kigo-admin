@@ -111,6 +111,21 @@ export const IcUnlock = (p: P) => (
   </svg>
 )
 
+export const IcEye = (p: P) => (
+  <svg {...base} className={p.className}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="3.2" />
+  </svg>
+)
+export const IcEyeOff = (p: P) => (
+  <svg {...base} className={p.className}>
+    <path d="M9.9 5.8A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.7 3.5" />
+    <path d="M6.3 7.9A17 17 0 0 0 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.2-1" />
+    <path d="M9.9 9.9a3.2 3.2 0 0 0 4.3 4.3" />
+    <path d="M4 4l16 16" />
+  </svg>
+)
+
 export const IcLogout = (p: P) => (
   <svg {...base} className={p.className}>
     <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3" />
