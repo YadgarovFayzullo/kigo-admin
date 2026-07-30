@@ -185,8 +185,8 @@ export async function fetchAll<T>(path: string, query?: Query): Promise<T[]> {
   const seen = new Set<string>()
   let url: string | null = buildUrl(path, { page_size: PAGE_SIZE, ...query })
   while (url) {
-    const data = await request<unknown>(url)
-    const rows = rowsOf<T>(data)
+    const data: unknown = await request<unknown>(url)
+    const rows: T[] | null = rowsOf<T>(data)
     if (!rows) break
     const mark = `${rows.length}:${JSON.stringify(rows[0] ?? null)}`
     if (seen.has(mark)) break
